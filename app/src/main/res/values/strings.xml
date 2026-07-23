@@ -1,3 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tailsync</string>
+    <string name="notification_channel_name">Sync service</string>
+    <string name="notification_channel_desc">Shows while Tailsync is running in the background</string>
+    <string name="notification_title">Tailsync</string>
+    <string name="notification_text_starting">Starting sync node…</string>
+    <string name="notification_text_running">Sync node is running</string>
+    <string name="notification_text_stopping">Stopping…</string>
+    <string name="notification_text_error">Sync node error</string>
+    <string name="service_stop_action">Stop</string>
 </resources>

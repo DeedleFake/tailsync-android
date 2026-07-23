@@ -1,0 +1,494 @@
+package dev.deedles.tailsync.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.deedles.tailsync.FormState
+import dev.deedles.tailsync.MainViewModel
+import dev.deedles.tailsync.StatusSummary
+import dev.deedles.tailsync.UiState
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TailsyncScreen(
+    viewModel: MainViewModel,
+    onPickDirectory: () -> Unit,
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Tailsync") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            ServiceCard(state = state, onToggle = viewModel::setServiceEnabled)
+            if (!state.formEnabled) {
+                Text(
+                    when {
+                        state.phase == "starting" ||
+                            (state.switchChecked && !state.serviceRunning) ->
+                            "Configuration is locked while the service is starting."
+                        state.phase == "stopping" ->
+                            "Configuration is locked while the service is stopping."
+                        else ->
+                            "Configuration is locked while the service is running. " +
+                                "Stop the service to edit settings (restart required for changes)."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            StatusCard(state = state)
+            AuthCard(
+                form = state.form,
+                enabled = state.formEnabled,
+                hasStoredAuthKey = state.hasStoredAuthKey,
+                onChange = viewModel::updateForm,
+            )
+            DirectoryCard(
+                form = state.form,
+                pathHint = state.pathHint,
+                enabled = state.formEnabled,
+                onChange = viewModel::updateForm,
+                onPickDirectory = onPickDirectory,
+                onUseDefault = viewModel::useDefaultSyncDir,
+            )
+            ConfigCard(
+                form = state.form,
+                enabled = state.formEnabled,
+                onChange = viewModel::updateForm,
+            )
+            Button(
+                onClick = viewModel::saveSettings,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.formEnabled,
+            ) {
+                Text(if (state.formEnabled) "Save settings" else "Stop service to edit & save")
+            }
+            state.saveMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.primary)
+            }
+            LogsCard(lines = state.logLines)
+            state.engineVersion?.let {
+                Text(
+                    "Engine: $it",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun ServiceCard(
+    state: UiState,
+    onToggle: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sync service", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = when {
+                        state.phase == "starting" -> "Starting…"
+                        state.phase == "stopping" -> "Stopping…"
+                        state.nodeRunning -> "Node running (${state.phase})"
+                        state.serviceRunning -> "Service active (${state.phase})"
+                        state.switchChecked && !state.serviceRunning -> "Starting…"
+                        !state.switchChecked && state.serviceRunning -> "Stopping…"
+                        else -> "Stopped"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.switchChecked,
+                onCheckedChange = onToggle,
+                enabled = state.switchEnabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusCard(state: UiState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Status", style = MaterialTheme.typography.titleMedium)
+            state.lastError?.let {
+                Text(
+                    "Error: $it",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            val summary = state.statusSummary
+            if (summary != null) {
+                StatusRows(summary)
+            } else {
+                Text(
+                    "Start the service to see live status from StatusJSON / events.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusRows(summary: StatusSummary) {
+    val rows = listOf(
+        "Phase" to summary.phase,
+        "Running" to summary.running.toString(),
+        "Dir" to summary.dir,
+        "Hostname" to summary.hostname.ifBlank { "—" },
+        "Port" to summary.port.toString(),
+        "Net mode" to summary.netMode,
+        "Service filter" to summary.service.ifBlank { "—" },
+        "Peers" to summary.peers.ifBlank { "(discovery)" },
+        "Version" to summary.version.ifBlank { "—" },
+    )
+    rows.forEach { (label, value) ->
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                label,
+                modifier = Modifier.width(110.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(value, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun AuthCard(
+    form: FormState,
+    enabled: Boolean,
+    hasStoredAuthKey: Boolean,
+    onChange: ((FormState) -> FormState) -> Unit,
+) {
+    var showKey by remember { mutableStateOf(false) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Tailscale authentication", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "First registration needs a Tailscale auth key (or existing tsnet state " +
+                    "under StateDir). Prefer a reusable/ephemeral key from the admin console. " +
+                    "The key is stored with EncryptedSharedPreferences and is never logged.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.authKey,
+                onValueChange = { value -> onChange { it.copy(authKey = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Auth key") },
+                singleLine = true,
+                visualTransformation = if (showKey) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    IconButton(onClick = { showKey = !showKey }, enabled = enabled) {
+                        Icon(
+                            imageVector = if (showKey) {
+                                Icons.Default.VisibilityOff
+                            } else {
+                                Icons.Default.Visibility
+                            },
+                            contentDescription = if (showKey) "Hide auth key" else "Show auth key",
+                        )
+                    }
+                },
+                supportingText = {
+                    when {
+                        form.authKey.isNotBlank() -> Text("Key will be saved securely")
+                        hasStoredAuthKey -> Text("A key is stored securely on this device")
+                        else -> Text("Required for first tsnet registration")
+                    }
+                },
+            )
+            OutlinedTextField(
+                value = form.hostname,
+                onValueChange = { value -> onChange { it.copy(hostname = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Hostname (tsnet)") },
+                singleLine = true,
+                placeholder = { Text("tailsync-phone") },
+            )
+            OutlinedTextField(
+                value = form.stateDir,
+                onValueChange = { value -> onChange { it.copy(stateDir = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("State directory (absolute)") },
+                singleLine = true,
+                supportingText = {
+                    Text("tsnet state + indexes; defaults under app files dir")
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectoryCard(
+    form: FormState,
+    pathHint: String?,
+    enabled: Boolean,
+    onChange: ((FormState) -> FormState) -> Unit,
+    onPickDirectory: () -> Unit,
+    onUseDefault: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Sync directory", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "The engine needs an absolute, writable filesystem path. " +
+                    "App-private storage is the supported default. SAF picks only apply " +
+                    "when they resolve to a real path (often not possible for Downloads).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = form.syncDir,
+                onValueChange = { value -> onChange { it.copy(syncDir = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Sync dir (absolute path)") },
+                singleLine = true,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPickDirectory, enabled = enabled) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pick folder")
+                }
+                OutlinedButton(onClick = onUseDefault, enabled = enabled) {
+                    Text("App default")
+                }
+            }
+            form.treeUri?.let {
+                Text(
+                    "SAF tree: $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            pathHint?.let {
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfigCard(
+    form: FormState,
+    enabled: Boolean,
+    onChange: ((FormState) -> FormState) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Node configuration", style = MaterialTheme.typography.titleMedium)
+
+            Text("Network mode", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("tsnet", "host", "plain").forEach { mode ->
+                    FilterChip(
+                        selected = form.netMode == mode,
+                        onClick = { onChange { it.copy(netMode = mode) } },
+                        enabled = enabled,
+                        label = { Text(mode) },
+                    )
+                }
+            }
+            Text(
+                "Use tsnet on Android (embedded Tailscale). host needs system tailscaled; " +
+                    "plain is localhost-only for tests.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            OutlinedTextField(
+                value = form.port,
+                onValueChange = { value ->
+                    onChange {
+                        it.copy(port = value.filter(Char::isDigit).take(5))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Port (0 = default 5960)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                supportingText = { Text("Valid range 0–65535") },
+            )
+            OutlinedTextField(
+                value = form.serviceName,
+                onValueChange = { value -> onChange { it.copy(serviceName = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Service name filter") },
+                singleLine = true,
+                supportingText = { Text("Hostname/DNS substring filter for discovery") },
+            )
+            OutlinedTextField(
+                value = form.peers,
+                onValueChange = { value -> onChange { it.copy(peers = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Peers (comma-separated host:port)") },
+                singleLine = false,
+                minLines = 1,
+                maxLines = 3,
+                supportingText = { Text("Leave empty to use discovery") },
+            )
+            OutlinedTextField(
+                value = form.scanIntervalMs,
+                onValueChange = { value ->
+                    onChange { it.copy(scanIntervalMs = value.filter(Char::isDigit)) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Scan interval ms (0 = 30000)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            OutlinedTextField(
+                value = form.syncIntervalMs,
+                onValueChange = { value ->
+                    onChange { it.copy(syncIntervalMs = value.filter(Char::isDigit)) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Sync interval ms (0 = 45000)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            OutlinedTextField(
+                value = form.blockSize,
+                onValueChange = { value ->
+                    onChange { it.copy(blockSize = value.filter(Char::isDigit)) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                label = { Text("Block size (0 = default)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LogsCard(lines: List<String>) {
+    // Show last N lines without a nested scrollable (parent Column scrolls).
+    val shown = remember(lines) { lines.takeLast(LOG_PREVIEW_LINES).asReversed() }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Recent events", style = MaterialTheme.typography.titleMedium)
+            if (shown.isEmpty()) {
+                Text(
+                    "No events yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                shown.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val LOG_PREVIEW_LINES = 20
