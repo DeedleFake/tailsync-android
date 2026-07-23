@@ -87,7 +87,7 @@ fun TailsyncScreen(
                     when {
                         state.phase == "starting" ||
                             (state.switchChecked && !state.serviceRunning) ->
-                            "Configuration is locked while the service is starting."
+                            "Configuration is locked while the service is starting." 
                         state.phase == "stopping" ->
                             "Configuration is locked while the service is stopping."
                         else ->
