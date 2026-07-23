@@ -405,11 +405,15 @@ class MainViewModel(
                 running = o.optBoolean("running", false),
                 phase = o.optString("phase", "unknown"),
                 dir = o.optString("dir", ""),
+                stateDir = o.optString("state_dir", ""),
                 hostname = o.optString("hostname", ""),
                 port = o.optInt("port", 0),
                 netMode = o.optString("net_mode", ""),
                 service = o.optString("service", ""),
                 peers = o.optString("peers", ""),
+                scanIntervalMs = o.optLong("scan_interval_ms", 0L),
+                syncIntervalMs = o.optLong("sync_interval_ms", 0L),
+                blockSize = o.optInt("block_size", 0),
                 version = o.optString("version", ""),
             )
         } catch (_: Exception) {
@@ -468,11 +472,15 @@ data class StatusSummary(
     val running: Boolean,
     val phase: String,
     val dir: String,
+    val stateDir: String,
     val hostname: String,
     val port: Int,
     val netMode: String,
     val service: String,
     val peers: String,
+    val scanIntervalMs: Long,
+    val syncIntervalMs: Long,
+    val blockSize: Int,
     val version: String,
 )
 

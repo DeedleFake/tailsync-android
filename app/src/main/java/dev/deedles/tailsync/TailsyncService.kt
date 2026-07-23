@@ -230,8 +230,20 @@ class TailsyncService : LifecycleService() {
         } catch (e: Exception) {
             disposeNode(created, "start-failed")
             ownedNode.compareAndSet(created, null)
+            val msg = safeErrorMessage(e)
+            // Mobile returns "start aborted" when Stop wins the race mid-start.
+            // That is a normal cancel path, not a sticky user-facing failure.
+            if (isStartAborted(msg)) {
+                TailsyncRuntime.appendLog("Start aborted")
+                if (stillOwner(gen)) {
+                    // Ownership retained but Start aborted: tear service down
+                    // without branding it as an error.
+                    cancelStartQuietly()
+                }
+                return
+            }
             if (stillOwner(gen)) {
-                failAndStop("Start failed: ${safeErrorMessage(e)}")
+                failAndStop("Start failed: $msg")
             }
             return
         }
@@ -273,9 +285,12 @@ class TailsyncService : LifecycleService() {
             val obj = JSONObject(eventJson)
             when (obj.optString("type")) {
                 "status" -> {
+                    // Status events are {type, running, msg} only — no phase.
+                    // Phase is authoritative from StatusJSON polling; do not
+                    // infer starting/stopping/idle from the running flag alone
+                    // (IsRunning semantics differ from StatusJSON.running).
                     val running = obj.optBoolean("running", false)
                     TailsyncRuntime.setNodeRunning(running)
-                    TailsyncRuntime.setPhase(if (running) "running" else "idle")
                     val msg = obj.optString("msg", "")
                     if (msg.isNotBlank()) {
                         TailsyncRuntime.appendLog(msg)
@@ -287,11 +302,16 @@ class TailsyncService : LifecycleService() {
                 "error" -> {
                     val msg = obj.optString("msg", "unknown error")
                     val phase = obj.optString("phase", "")
-                    TailsyncRuntime.setLastError(msg)
+                    val redacted = LogRedactor.redact(msg)
                     TailsyncRuntime.appendLog(
-                        "error${if (phase.isNotBlank()) " ($phase)" else ""}: $msg",
+                        "error${if (phase.isNotBlank()) " ($phase)" else ""}: $redacted",
                     )
-                    updateNotification(getString(R.string.notification_text_error))
+                    // "start aborted" is concurrent Stop during Start — not a
+                    // sticky failure to show in the error banner.
+                    if (!isStartAborted(redacted)) {
+                        TailsyncRuntime.setLastError(redacted)
+                        updateNotification(getString(R.string.notification_text_error))
+                    }
                 }
                 "log" -> {
                     val level = obj.optString("level", "INFO")
@@ -323,12 +343,32 @@ class TailsyncService : LifecycleService() {
             if (!stillOwner(gen) || ownedNode.get() !== active) return
             TailsyncRuntime.setStatusJson(json)
             val obj = JSONObject(json)
-            TailsyncRuntime.setPhase(
-                obj.optString("phase", if (active.isRunning) "running" else "idle"),
-            )
+            // Prefer StatusJSON.phase (idle|starting|running|stopping).
+            // Do not fall back to isRunning → "running": IsRunning is true for
+            // starting/stopping as well, which would mislabel the UI.
+            val phase = obj.optString("phase", "")
+            if (phase.isNotBlank()) {
+                TailsyncRuntime.setPhase(phase)
+            }
+            // StatusJSON.running is true only while serving after a successful Start.
             TailsyncRuntime.setNodeRunning(obj.optBoolean("running", false))
         } catch (_: Exception) {
             // Status is best-effort for UI.
+        }
+    }
+
+    /**
+     * Tear down after a cancelled/aborted start without treating it as a
+     * user-visible error (no sticky lastError, keep notification neutral).
+     */
+    private suspend fun cancelStartQuietly() {
+        restartRequested = false
+        // User already cleared wanted on toggle-off; if still true, leave it —
+        // only failAndStop clears wanted on real failures.
+        TailsyncRuntime.setPhase("idle")
+        TailsyncRuntime.setNodeRunning(false)
+        withContext(Dispatchers.Main) {
+            stopSelfGracefully()
         }
     }
 
@@ -420,6 +460,12 @@ class TailsyncService : LifecycleService() {
 
     private fun safeErrorMessage(e: Exception): String =
         LogRedactor.redact(e.message ?: e.javaClass.simpleName)
+
+    /** Mobile engine message when Stop aborts an in-flight Start. */
+    private fun isStartAborted(message: String): Boolean {
+        val m = message.lowercase()
+        return m.contains("start aborted") || m == "start aborted"
+    }
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(

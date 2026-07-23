@@ -211,11 +211,15 @@ private fun StatusRows(summary: StatusSummary) {
         "Phase" to summary.phase,
         "Running" to summary.running.toString(),
         "Dir" to summary.dir,
+        "State dir" to summary.stateDir.ifBlank { "—" },
         "Hostname" to summary.hostname.ifBlank { "—" },
         "Port" to summary.port.toString(),
         "Net mode" to summary.netMode,
         "Service filter" to summary.service.ifBlank { "—" },
         "Peers" to summary.peers.ifBlank { "(discovery)" },
+        "Scan ms" to summary.scanIntervalMs.toString(),
+        "Sync ms" to summary.syncIntervalMs.toString(),
+        "Block size" to summary.blockSize.toString(),
         "Version" to summary.version.ifBlank { "—" },
     )
     rows.forEach { (label, value) ->
