@@ -77,6 +77,8 @@ class TailsyncService : LifecycleService() {
         createNotificationChannel()
         TailsyncRuntime.setServiceRunning(true)
         TailsyncRuntime.setEngineVersion(runCatching { Mobile.version() }.getOrNull())
+        // Keep Go's interface snapshot current for tsnet (Android blocks netlink).
+        AndroidNetworkBridge.startMonitoring(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -134,6 +136,7 @@ class TailsyncService : LifecycleService() {
             disposeNode(ownedNode.getAndSet(null), "onDestroy-late")
         }
 
+        AndroidNetworkBridge.stopMonitoring(this)
         serviceActive.set(false)
         TailsyncRuntime.setServiceRunning(false)
         TailsyncRuntime.markIdle()
@@ -250,6 +253,32 @@ class TailsyncService : LifecycleService() {
         if (!stateDirFile.isDirectory || !stateDirFile.canWrite()) {
             if (stillOwner(gen)) {
                 failAndStop("State directory is not writable: ${stateDirFile.absolutePath}")
+            }
+            return
+        }
+
+        if (!stillOwner(gen)) return
+
+        // Required on Android API 30+: feed interfaces from Java so tsnet does
+        // not call Go net.Interfaces() (netlink → permission denied).
+        try {
+            val snap = AndroidNetworkBridge.collectAndPublish(this, notify = false)
+            if (snap.interfaceCount == 0) {
+                if (stillOwner(gen)) {
+                    failAndStop(
+                        "No network interfaces available to share with tsnet. " +
+                            "Check connectivity and INTERNET permission.",
+                    )
+                }
+                return
+            }
+            TailsyncRuntime.appendLog(
+                "Network snapshot: ${snap.interfaceCount} interface(s), " +
+                    "default=${snap.defaultInterface.ifBlank { "none" }}",
+            )
+        } catch (e: Exception) {
+            if (stillOwner(gen)) {
+                failAndStop("Failed to publish network interfaces: ${safeErrorMessage(e)}")
             }
             return
         }
