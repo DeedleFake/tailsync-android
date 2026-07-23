@@ -12,12 +12,21 @@ class TailsyncApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        DiagLog.init(this)
         settingsRepository = SettingsRepository(this)
+        // If last process died mid-start (native abort), do not auto-restart.
+        if (DiagLog.lastStartLookedIncomplete(this) && settingsRepository.isServiceWanted()) {
+            DiagLog.w("Clearing service_wanted after incomplete previous start")
+            settingsRepository.setServiceWanted(false)
+        }
         // tsnet needs HOME / TS_LOGS_DIR before Up (else panic + process abort).
+        DiagLog.i("Application.onCreate: applying tsnet env")
         TsnetAndroidEnv.apply(this)
         // Required gomobile init for Go↔JVM callbacks on Android.
+        DiagLog.i("Application.onCreate: Seq.setContext + Mobile.touch")
         Seq.setContext(applicationContext)
         Mobile.touch()
+        DiagLog.i("Application.onCreate: Mobile.version=${runCatching { Mobile.version() }.getOrNull()}")
     }
 
     companion object {

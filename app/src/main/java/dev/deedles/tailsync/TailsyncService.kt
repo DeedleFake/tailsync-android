@@ -202,17 +202,24 @@ class TailsyncService : LifecycleService() {
     }
 
     private suspend fun runStart(gen: Long) {
+        DiagLog.markStartBegin(gen)
         TailsyncRuntime.setLastError(null)
         TailsyncRuntime.setPhase("starting")
         TailsyncRuntime.clearLogs()
         TailsyncRuntime.appendLog("Starting node…")
 
         // Ensure HOME/TS_LOGS_DIR even if Application path was skipped in tests.
+        DiagLog.i("runStart[$gen] step=env")
         TsnetAndroidEnv.apply(applicationContext)
+        DiagLog.i("runStart[$gen] env=${TsnetAndroidEnv.lastSummary}")
 
-        if (!stillOwner(gen)) return
+        if (!stillOwner(gen)) {
+            DiagLog.w("runStart[$gen] lost ownership after env")
+            return
+        }
 
         if (!StorageAccess.hasAllFilesAccess()) {
+            DiagLog.markStartFailed("no all-files access")
             if (stillOwner(gen)) {
                 failAndStop(
                     "All files access is required to sync a folder. " +
@@ -221,12 +228,19 @@ class TailsyncService : LifecycleService() {
             }
             return
         }
+        DiagLog.i("runStart[$gen] step=paths allFiles=true")
 
         val user = settings.load()
         val syncPath = user.syncDir.trim()
         val statePath = user.stateDir.trim()
+        DiagLog.i(
+            "runStart[$gen] syncDir=$syncPath stateDir=$statePath " +
+                "hostname=${user.hostname.ifBlank { "(empty)" }} " +
+                "hasAuthKey=${user.authKey.isNotBlank()} port=${user.port}",
+        )
         // Validate without creating (isAbsoluteWritable never mkdirs).
         if (syncPath.isBlank() || !PathUtils.isAbsoluteWritable(syncPath)) {
+            DiagLog.markStartFailed("sync path invalid: $syncPath")
             if (stillOwner(gen)) {
                 failAndStop(
                     if (syncPath.isBlank()) {
@@ -239,6 +253,7 @@ class TailsyncService : LifecycleService() {
             return
         }
         if (statePath.isBlank() || !PathUtils.isAbsoluteWritable(statePath)) {
+            DiagLog.markStartFailed("state path invalid: $statePath")
             if (stillOwner(gen)) {
                 failAndStop(
                     if (statePath.isBlank()) {
@@ -254,25 +269,36 @@ class TailsyncService : LifecycleService() {
         val syncDirFile = PathUtils.ensureDir(syncPath)
         val stateDirFile = PathUtils.ensureDir(statePath)
         if (!syncDirFile.isDirectory || !syncDirFile.canWrite()) {
+            DiagLog.markStartFailed("sync dir not writable after ensureDir")
             if (stillOwner(gen)) {
                 failAndStop("Sync directory is not writable: ${syncDirFile.absolutePath}")
             }
             return
         }
         if (!stateDirFile.isDirectory || !stateDirFile.canWrite()) {
+            DiagLog.markStartFailed("state dir not writable after ensureDir")
             if (stillOwner(gen)) {
                 failAndStop("State directory is not writable: ${stateDirFile.absolutePath}")
             }
             return
         }
+        DiagLog.i("runStart[$gen] step=paths-ok sync=${syncDirFile.absolutePath}")
 
         if (!stillOwner(gen)) return
 
         // Required on Android API 30+: feed interfaces from Java so tsnet does
         // not call Go net.Interfaces() (netlink → permission denied).
         try {
+            DiagLog.i("runStart[$gen] step=network-publish")
             val snap = AndroidNetworkBridge.collectAndPublish(this, notify = false)
+            // Log JSON (may be long) for netlink debugging.
+            DiagLog.i(
+                "runStart[$gen] ifaces=${snap.interfaceCount} " +
+                    "defaultIf=${snap.defaultInterface} gw=${snap.defaultGateway}",
+            )
+            DiagLog.i("runStart[$gen] ifacesJson=${snap.interfacesJson.take(1500)}")
             if (snap.interfaceCount == 0) {
+                DiagLog.markStartFailed("zero network interfaces")
                 if (stillOwner(gen)) {
                     failAndStop(
                         "No network interfaces available to share with tsnet. " +
@@ -286,6 +312,7 @@ class TailsyncService : LifecycleService() {
                     "default=${snap.defaultInterface.ifBlank { "none" }}",
             )
         } catch (e: Exception) {
+            DiagLog.markStartFailed("network publish: ${e.message}")
             if (stillOwner(gen)) {
                 failAndStop("Failed to publish network interfaces: ${safeErrorMessage(e)}")
             }
@@ -310,38 +337,56 @@ class TailsyncService : LifecycleService() {
             // are desktop or test-only and are not exposed in the UI).
             netMode = "tsnet"
         }
+        DiagLog.i(
+            "runStart[$gen] step=newNode dir=${cfg.dir} stateDir=${cfg.stateDir} " +
+                "netMode=${cfg.netMode} port=${cfg.port} " +
+                "hostname=${cfg.hostname.ifBlank { "(empty)" }} authKeySet=${cfg.authKey.isNotBlank()}",
+        )
 
         val created = try {
             Mobile.newNode(cfg)
         } catch (e: Exception) {
+            DiagLog.markStartFailed("newNode: ${e.message}")
             if (stillOwner(gen)) {
                 failAndStop("Invalid config: ${safeErrorMessage(e)}")
             }
             return
         }
+        DiagLog.i("runStart[$gen] step=newNode-ok")
 
         if (!claimNode(created, gen)) {
+            DiagLog.markStartFailed("claimNode failed")
             disposeNode(created, "claim-failed")
             return
         }
+        DiagLog.i("runStart[$gen] step=claimed")
 
         created.setListener(EventListener { eventJson ->
             // Called from a Go background thread — keep this fast.
             if (ownedNode.get() === created && stillOwner(gen)) {
+                // Truncate for logcat; full event still goes through handleNativeEvent.
+                DiagLog.i("event gen=$gen ${eventJson.take(300)}")
                 handleNativeEvent(eventJson)
             }
         })
 
         // Poll during Start as well: StatusJSON may expose needs_login / auth_url
         // while interactive browser login is in progress (Start still blocked).
+        DiagLog.i("runStart[$gen] step=status-poll-start")
         startStatusPolling(created, gen)
 
         try {
             // Blocks until listening or failure; may be aborted by concurrent stop().
             // When AuthKey is empty and there is no tsnet state, an "auth" event
             // is emitted with a login URL; Start remains blocked until login ends.
+            //
+            // If this process aborts with SIGABRT, check logcat tags Go / GoLog /
+            // TailsyncDiag — last breadcrumb is usually this step.
+            DiagLog.i("runStart[$gen] step=node.start ENTER (blocking; watch Go/GoLog next)")
             created.start()
+            DiagLog.i("runStart[$gen] step=node.start EXIT ok")
         } catch (e: Exception) {
+            DiagLog.markStartFailed("node.start exception: ${e.message}")
             disposeNode(created, "start-failed")
             ownedNode.compareAndSet(created, null)
             val msg = safeErrorMessage(e)
@@ -364,6 +409,7 @@ class TailsyncService : LifecycleService() {
 
         // Post-start: cooperative cancel does not abort JNI; check ownership.
         if (!stillOwner(gen) || ownedNode.get() !== created) {
+            DiagLog.markStartFailed("aborted-after-start ownership lost")
             disposeNode(created, "aborted-after-start")
             ownedNode.compareAndSet(created, null)
             return
@@ -373,6 +419,8 @@ class TailsyncService : LifecycleService() {
         TailsyncRuntime.setPhase("running")
         clearAuthLoginState()
         TailsyncRuntime.appendLog("Node started")
+        DiagLog.markStartSucceeded()
+        DiagLog.i("runStart[$gen] step=running")
         refreshStatus(created, gen)
         updateNotification(getString(R.string.notification_text_running))
         // Polling already running from pre-start; ensure it continues for this gen.
@@ -533,6 +581,7 @@ class TailsyncService : LifecycleService() {
 
     private suspend fun failAndStop(message: String) {
         val safe = LogRedactor.redact(message)
+        DiagLog.markStartFailed(safe)
         Log.e(TAG, safe)
         // Terminal start failure: clear persisted user intent so UI/cold-start
         // does not re-enter a stuck "wanted but not running" state.

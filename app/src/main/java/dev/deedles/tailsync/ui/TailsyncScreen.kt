@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.deedles.tailsync.AuthBrowser
+import dev.deedles.tailsync.DiagLog
 import dev.deedles.tailsync.FormState
 import dev.deedles.tailsync.MainViewModel
 import dev.deedles.tailsync.StatusSummary
@@ -155,6 +156,7 @@ fun TailsyncScreen(
                 Text(it, color = MaterialTheme.colorScheme.primary)
             }
             LogsCard(lines = state.logLines)
+            DiagnosticsCard(context = context)
             state.engineVersion?.let {
                 Text(
                     "Engine: $it",
@@ -680,6 +682,45 @@ private fun LogsCard(lines: List<String>) {
                         ),
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Durable start breadcrumbs (survives native SIGABRT that kills the process
+ * before "Recent events" can help). Filter logcat: `adb logcat -s TailsyncDiag GoLog Go`
+ */
+@Composable
+private fun DiagnosticsCard(context: android.content.Context) {
+    var text by remember {
+        mutableStateOf(DiagLog.readRecent(context, maxLines = 40))
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Start diagnostics", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Survives crashes. Last steps before a native abort appear here after relaunch. " +
+                    "logcat: adb logcat -s TailsyncDiag GoLog Go",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { text = DiagLog.readRecent(context, maxLines = 40) }) {
+                Text("Refresh")
+            }
+            if (text.isBlank()) {
+                Text(
+                    "No diagnostic trail yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                )
             }
         }
     }

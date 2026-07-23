@@ -77,6 +77,7 @@ class MainViewModel(
         }
         // After process death: if user wanted the service, request start (sets pending).
         // Do not set pending alone without a start attempt — that hard-locks the switch.
+        // Application may have cleared service_wanted after an incomplete native crash.
         if (settingsRepo.isServiceWanted() && !TailsyncRuntime.serviceRunning.value) {
             requestStart(persistFormFirst = false)
         }

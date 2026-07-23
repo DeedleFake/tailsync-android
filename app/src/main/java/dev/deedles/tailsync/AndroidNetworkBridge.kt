@@ -79,6 +79,11 @@ object AndroidNetworkBridge {
                 if (notify) {
                     Mobile.notifyNetworkChange()
                 }
+                DiagLog.i(
+                    "network publish count=${snapshot.interfaceCount} " +
+                        "defaultIf=${snapshot.defaultInterface.ifBlank { "(none)" }} " +
+                        "gw=${snapshot.defaultGateway.ifBlank { "(none)" }} notify=$notify",
+                )
                 Log.i(
                     TAG,
                     "Published ${snapshot.interfaceCount} interface(s) " +
@@ -86,6 +91,7 @@ object AndroidNetworkBridge {
                         "gw=${snapshot.defaultGateway.ifBlank { "(none)" }} notify=$notify",
                 )
             } catch (e: Exception) {
+                DiagLog.e("network publish failed", e)
                 Log.e(TAG, "Failed to publish network snapshot to Go", e)
                 throw e
             }
