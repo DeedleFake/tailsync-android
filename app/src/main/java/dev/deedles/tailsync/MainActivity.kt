@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onGrantAllFilesAccess = { openAllFilesSettings() },
+                        // Explicit button always opens; composition auto-open uses openOnce.
+                        onOpenAuthUrl = { url -> AuthBrowser.open(this, url) },
                     )
                 }
             }

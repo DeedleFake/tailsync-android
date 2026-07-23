@@ -63,6 +63,14 @@ class TailsyncService : LifecycleService() {
     @Volatile
     private var restartRequested: Boolean = false
 
+    /** Last notification body text applied (skip redundant notify + rebuilds). */
+    @Volatile
+    private var lastNotificationText: String? = null
+
+    /** Auth URL last embedded in the notification action (null = no action). */
+    @Volatile
+    private var lastNotificationAuthUrl: String? = null
+
     override fun onCreate() {
         super.onCreate()
         serviceActive.set(true)
@@ -79,6 +87,20 @@ class TailsyncService : LifecycleService() {
                 restartRequested = false
                 stopSelfGracefully()
                 return START_NOT_STICKY
+            }
+            ACTION_OPEN_AUTH -> {
+                val url = intent.getStringExtra(EXTRA_AUTH_URL)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: TailsyncRuntime.authUrl.value
+                if (!url.isNullOrBlank()) {
+                    // Explicit notification action — always open (not once-only).
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        AuthBrowser.open(applicationContext, url)
+                    }
+                }
+                // Do not re-enter startNode; service may already be starting.
+                return START_STICKY
             }
             else -> {
                 startInForeground(getString(R.string.notification_text_starting))
@@ -115,10 +137,19 @@ class TailsyncService : LifecycleService() {
         serviceActive.set(false)
         TailsyncRuntime.setServiceRunning(false)
         TailsyncRuntime.markIdle()
+        AuthBrowser.clearAutoOpenTracking()
+        lastNotificationText = null
+        lastNotificationAuthUrl = null
         super.onDestroy()
     }
 
     private fun startInForeground(contentText: String) {
+        lastNotificationText = contentText
+        lastNotificationAuthUrl = if (TailsyncRuntime.needsLogin.value) {
+            TailsyncRuntime.authUrl.value?.trim()?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
         val notification = buildNotification(contentText)
         ServiceCompat.startForeground(
             this,
@@ -263,8 +294,14 @@ class TailsyncService : LifecycleService() {
             }
         })
 
+        // Poll during Start as well: StatusJSON may expose needs_login / auth_url
+        // while interactive browser login is in progress (Start still blocked).
+        startStatusPolling(created, gen)
+
         try {
             // Blocks until listening or failure; may be aborted by concurrent stop().
+            // When AuthKey is empty and there is no tsnet state, an "auth" event
+            // is emitted with a login URL; Start remains blocked until login ends.
             created.start()
         } catch (e: Exception) {
             disposeNode(created, "start-failed")
@@ -296,9 +333,11 @@ class TailsyncService : LifecycleService() {
 
         TailsyncRuntime.setNodeRunning(true)
         TailsyncRuntime.setPhase("running")
+        clearAuthLoginState()
         TailsyncRuntime.appendLog("Node started")
         refreshStatus(created, gen)
         updateNotification(getString(R.string.notification_text_running))
+        // Polling already running from pre-start; ensure it continues for this gen.
         startStatusPolling(created, gen)
     }
 
@@ -320,6 +359,16 @@ class TailsyncService : LifecycleService() {
 
     private fun handleNativeEvent(eventJson: String) {
         TailsyncRuntime.emitEvent(eventJson)
+        // Auth event: parse with pure helper, post open to main (never block Go).
+        AuthSignals.parseAuthEvent(eventJson)?.let { auth ->
+            val status = AuthSignals.parseAuthStatus(TailsyncRuntime.statusJson.value)
+            val url = AuthSignals.resolveAuthUrl(auth.url, status) ?: auth.url
+            TailsyncRuntime.setAuthLogin(url)
+            TailsyncRuntime.appendLog("Tailscale browser login required")
+            updateNotification(getString(R.string.notification_text_login))
+            scheduleAuthOpenOnce(url)
+            return
+        }
         try {
             val obj = JSONObject(eventJson)
             when (obj.optString("type")) {
@@ -335,6 +384,7 @@ class TailsyncService : LifecycleService() {
                         TailsyncRuntime.appendLog(msg)
                     }
                     if (running) {
+                        clearAuthLoginState()
                         updateNotification(getString(R.string.notification_text_running))
                     }
                 }
@@ -390,10 +440,42 @@ class TailsyncService : LifecycleService() {
                 TailsyncRuntime.setPhase(phase)
             }
             // StatusJSON.running is true only while serving after a successful Start.
-            TailsyncRuntime.setNodeRunning(obj.optBoolean("running", false))
+            val running = obj.optBoolean("running", false)
+            TailsyncRuntime.setNodeRunning(running)
+
+            val auth = AuthSignals.parseAuthStatus(json)
+            TailsyncRuntime.applyAuthStatus(auth, running = running)
+            if (auth.needsLogin) {
+                updateNotification(getString(R.string.notification_text_login))
+                // Status URL if present; else URL already held from an auth event.
+                val url = AuthSignals.resolveAuthUrl(eventUrl = null, status = auth)
+                    ?: TailsyncRuntime.authUrl.value
+                if (!url.isNullOrBlank()) {
+                    scheduleAuthOpenOnce(url)
+                }
+            } else if (running) {
+                updateNotification(getString(R.string.notification_text_running))
+            }
         } catch (_: Exception) {
             // Status is best-effort for UI.
         }
+    }
+
+    /**
+     * Posts a once-per-URL open on Main only when [AuthBrowser] would actually
+     * launch (avoids scheduling a Main coroutine every status poll).
+     */
+    private fun scheduleAuthOpenOnce(url: String) {
+        if (!AuthBrowser.shouldOpenOnce(url)) return
+        lifecycleScope.launch(Dispatchers.Main) {
+            AuthBrowser.openOnce(applicationContext, url)
+        }
+    }
+
+    /** Clears login UI state and browser once-open tracking together. */
+    private fun clearAuthLoginState() {
+        TailsyncRuntime.clearAuthLogin()
+        AuthBrowser.clearAutoOpenTracking()
     }
 
     /**
@@ -480,6 +562,7 @@ class TailsyncService : LifecycleService() {
         TailsyncRuntime.setNodeRunning(false)
         TailsyncRuntime.setPhase("idle")
         TailsyncRuntime.setStatusJson(null)
+        clearAuthLoginState()
         TailsyncRuntime.appendLog("Node stopped")
     }
 
@@ -531,7 +614,7 @@ class TailsyncService : LifecycleService() {
             Intent(this, TailsyncService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_stat_sync)
@@ -540,10 +623,40 @@ class TailsyncService : LifecycleService() {
             .setOnlyAlertOnce(true)
             .addAction(0, getString(R.string.service_stop_action), stopIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+
+        // When interactive login is required and a URL is known, offer a direct
+        // "Sign in" action (explicit open; not once-only).
+        val authUrl = if (TailsyncRuntime.needsLogin.value) {
+            TailsyncRuntime.authUrl.value?.trim()?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
+        if (authUrl != null) {
+            val openAuth = PendingIntent.getService(
+                this,
+                2,
+                Intent(this, TailsyncService::class.java)
+                    .setAction(ACTION_OPEN_AUTH)
+                    .putExtra(EXTRA_AUTH_URL, authUrl),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(0, getString(R.string.notification_sign_in_action), openAuth)
+        }
+        return builder.build()
     }
 
     private fun updateNotification(contentText: String) {
+        val authUrl = if (TailsyncRuntime.needsLogin.value) {
+            TailsyncRuntime.authUrl.value?.trim()?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
+        // Skip rebuild when neither body text nor sign-in action URL changed.
+        if (contentText == lastNotificationText && authUrl == lastNotificationAuthUrl) {
+            return
+        }
+        lastNotificationText = contentText
+        lastNotificationAuthUrl = authUrl
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIFICATION_ID, buildNotification(contentText))
     }
@@ -556,6 +669,8 @@ class TailsyncService : LifecycleService() {
         private const val STOP_JOIN_TIMEOUT_MS = 35_000L
 
         const val ACTION_STOP = "dev.deedles.tailsync.action.STOP"
+        const val ACTION_OPEN_AUTH = "dev.deedles.tailsync.action.OPEN_AUTH"
+        const val EXTRA_AUTH_URL = "dev.deedles.tailsync.extra.AUTH_URL"
 
         /** Process-scoped flag: true between [onCreate] and [onDestroy]. */
         private val serviceActive = AtomicBoolean(false)

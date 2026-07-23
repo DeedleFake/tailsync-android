@@ -6,7 +6,9 @@
     <string name="notification_title">Tailsync</string>
     <string name="notification_text_starting">Starting sync node…</string>
     <string name="notification_text_running">Sync node is running</string>
+    <string name="notification_text_login">Sign in with Tailscale to continue</string>
     <string name="notification_text_stopping">Stopping…</string>
     <string name="notification_text_error">Sync node error</string>
+    <string name="notification_sign_in_action">Sign in</string>
     <string name="service_stop_action">Stop</string>
 </resources>

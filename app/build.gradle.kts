@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.browser)
     implementation(libs.kotlinx.coroutines.android)
 
     val composeBom = platform(libs.androidx.compose.bom)

@@ -34,6 +34,14 @@ object TailsyncRuntime {
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
     val logLines: StateFlow<List<String>> = _logLines.asStateFlow()
 
+    /** True while the engine reports interactive Tailscale login is needed. */
+    private val _needsLogin = MutableStateFlow(false)
+    val needsLogin: StateFlow<Boolean> = _needsLogin.asStateFlow()
+
+    /** Browser login URL from an auth event or StatusJSON.auth_url. */
+    private val _authUrl = MutableStateFlow<String?>(null)
+    val authUrl: StateFlow<String?> = _authUrl.asStateFlow()
+
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 128)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
@@ -44,6 +52,7 @@ object TailsyncRuntime {
             if (_phase.value != "stopping") {
                 _phase.value = "idle"
             }
+            clearAuthLogin()
         }
     }
 
@@ -67,6 +76,41 @@ object TailsyncRuntime {
         _engineVersion.value = version
     }
 
+    /**
+     * Records that interactive login is required and stores [url] when non-blank.
+     * Blank url keeps any previously known auth URL while marking needsLogin.
+     */
+    fun setAuthLogin(url: String?) {
+        val trimmed = url?.trim()?.takeIf { it.isNotEmpty() }
+        _needsLogin.value = true
+        if (trimmed != null) {
+            _authUrl.value = trimmed
+        }
+    }
+
+    /**
+     * Clears interactive-login UI state. Does not touch browser auto-open
+     * tracking — callers that open URLs ([TailsyncService], UI) clear that
+     * via [AuthBrowser.clearAutoOpenTracking] so this object stays Android-free.
+     */
+    fun clearAuthLogin() {
+        _needsLogin.value = false
+        _authUrl.value = null
+    }
+
+    /**
+     * Applies StatusJSON needs_login / auth_url.
+     * Clears login UI only when [running] (serving after successful Start), so a
+     * poll that omits needs_login during start does not wipe an auth event URL.
+     */
+    fun applyAuthStatus(status: AuthStatusFields, running: Boolean = false) {
+        if (status.needsLogin) {
+            setAuthLogin(status.authUrl)
+        } else if (running) {
+            clearAuthLogin()
+        }
+    }
+
     fun clearLogs() {
         _logLines.value = emptyList()
     }
@@ -85,6 +129,7 @@ object TailsyncRuntime {
         _nodeRunning.value = false
         _phase.value = "idle"
         _statusJson.value = null
+        clearAuthLogin()
     }
 
     private const val MAX_LOG_LINES = 100

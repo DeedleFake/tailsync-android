@@ -13,8 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -30,21 +33,25 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.deedles.tailsync.AuthBrowser
 import dev.deedles.tailsync.FormState
 import dev.deedles.tailsync.MainViewModel
 import dev.deedles.tailsync.StatusSummary
@@ -56,8 +63,22 @@ fun TailsyncScreen(
     viewModel: MainViewModel,
     onPickDirectory: () -> Unit,
     onGrantAllFilesAccess: () -> Unit,
+    /** Explicit user action — always open (not once-only). */
+    onOpenAuthUrl: (String) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Auto-open once per distinct URL when login is required (service may also open).
+    LaunchedEffect(state.authUrl, state.needsLogin) {
+        val url = state.authUrl
+        if (state.needsLogin && !url.isNullOrBlank()) {
+            AuthBrowser.openOnce(context, url)
+        } else if (!state.needsLogin) {
+            // Runtime is UI-free; clear once-open tracking when login ends.
+            AuthBrowser.clearAutoOpenTracking()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -103,7 +124,10 @@ fun TailsyncScreen(
                 form = state.form,
                 enabled = state.formEnabled,
                 hasStoredAuthKey = state.hasStoredAuthKey,
+                needsLogin = state.needsLogin,
+                authUrl = state.authUrl,
                 onChange = viewModel::updateForm,
+                onOpenAuthUrl = onOpenAuthUrl,
             )
             DirectoryCard(
                 form = state.form,
@@ -207,6 +231,7 @@ private fun ServiceCard(
                 Text("Sync service", style = MaterialTheme.typography.titleMedium)
                 Text(
                     text = when {
+                        state.needsLogin -> "Waiting for Tailscale sign-in…"
                         state.phase == "starting" -> "Starting…"
                         state.phase == "stopping" -> "Stopping…"
                         state.nodeRunning -> "Node running (${state.phase})"
@@ -240,6 +265,18 @@ private fun StatusCard(state: UiState) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+            // One-line status only; CTA + explanation live in AuthCard.
+            if (state.needsLogin) {
+                Text(
+                    if (state.authUrl.isNullOrBlank()) {
+                        "Login: waiting for URL…"
+                    } else {
+                        "Login: needs browser sign-in"
+                    },
+                    color = MaterialTheme.colorScheme.tertiary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             val summary = state.statusSummary
             if (summary != null) {
                 StatusRows(summary)
@@ -256,20 +293,23 @@ private fun StatusCard(state: UiState) {
 
 @Composable
 private fun StatusRows(summary: StatusSummary) {
-    val rows = listOf(
-        "Phase" to summary.phase,
-        "Running" to summary.running.toString(),
-        "Dir" to summary.dir,
-        "State dir" to summary.stateDir.ifBlank { "—" },
-        "Hostname" to summary.hostname.ifBlank { "—" },
-        "Port" to summary.port.toString(),
-        "Service filter" to summary.service.ifBlank { "—" },
-        "Peers" to summary.peers.ifBlank { "(discovery)" },
-        "Scan ms" to summary.scanIntervalMs.toString(),
-        "Sync ms" to summary.syncIntervalMs.toString(),
-        "Block size" to summary.blockSize.toString(),
-        "Version" to summary.version.ifBlank { "—" },
-    )
+    val rows = buildList {
+        add("Phase" to summary.phase)
+        add("Running" to summary.running.toString())
+        if (summary.needsLogin) {
+            add("Login" to "needs browser sign-in")
+        }
+        add("Dir" to summary.dir)
+        add("State dir" to summary.stateDir.ifBlank { "—" })
+        add("Hostname" to summary.hostname.ifBlank { "—" })
+        add("Port" to summary.port.toString())
+        add("Service filter" to summary.service.ifBlank { "—" })
+        add("Peers" to summary.peers.ifBlank { "(discovery)" })
+        add("Scan ms" to summary.scanIntervalMs.toString())
+        add("Sync ms" to summary.syncIntervalMs.toString())
+        add("Block size" to summary.blockSize.toString())
+        add("Version" to summary.version.ifBlank { "—" })
+    }
     rows.forEach { (label, value) ->
         Row(Modifier.fillMaxWidth()) {
             Text(
@@ -288,52 +328,81 @@ private fun AuthCard(
     form: FormState,
     enabled: Boolean,
     hasStoredAuthKey: Boolean,
+    needsLogin: Boolean,
+    authUrl: String?,
     onChange: ((FormState) -> FormState) -> Unit,
+    onOpenAuthUrl: (String) -> Unit,
 ) {
     var showKey by remember { mutableStateOf(false) }
+    // Expand advanced if a key is already present so users see stored-key state.
+    var showAuthKeySection by remember {
+        mutableStateOf(hasStoredAuthKey || form.authKey.isNotBlank())
+    }
+    LaunchedEffect(hasStoredAuthKey, form.authKey) {
+        if (hasStoredAuthKey || form.authKey.isNotBlank()) {
+            showAuthKeySection = true
+        }
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Tailscale authentication", style = MaterialTheme.typography.titleMedium)
             Text(
-                "First registration needs a Tailscale auth key (or existing tsnet state " +
-                    "under StateDir). Prefer a reusable/ephemeral key from the admin console. " +
-                    "The key is stored with EncryptedSharedPreferences and is never logged.",
+                "On first run, start the sync service and sign in with Tailscale in the browser. " +
+                    "Existing tsnet state under the state directory reconnects without a prompt. " +
+                    "An auth key is optional (advanced) for unattended registration.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
-                value = form.authKey,
-                onValueChange = { value -> onChange { it.copy(authKey = value) } },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = enabled,
-                label = { Text("Auth key") },
-                singleLine = true,
-                visualTransformation = if (showKey) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                trailingIcon = {
-                    IconButton(onClick = { showKey = !showKey }, enabled = enabled) {
-                        Icon(
-                            imageVector = if (showKey) {
-                                Icons.Default.VisibilityOff
-                            } else {
-                                Icons.Default.Visibility
-                            },
-                            contentDescription = if (showKey) "Hide auth key" else "Show auth key",
+
+            if (needsLogin) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "Sign-in required",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
                         )
+                        Text(
+                            "Complete Tailscale login in the browser. " +
+                                "The sync service waits until you finish.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                        val url = authUrl
+                        Button(
+                            onClick = { if (!url.isNullOrBlank()) onOpenAuthUrl(url) },
+                            enabled = !url.isNullOrBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (url.isNullOrBlank()) {
+                                    "Waiting for login URL…"
+                                } else {
+                                    "Sign in with Tailscale"
+                                },
+                            )
+                        }
                     }
-                },
-                supportingText = {
-                    when {
-                        form.authKey.isNotBlank() -> Text("Key will be saved securely")
-                        hasStoredAuthKey -> Text("A key is stored securely on this device")
-                        else -> Text("Required for first tsnet registration")
-                    }
-                },
-            )
+                }
+            } else if (form.authKey.isBlank() && !hasStoredAuthKey) {
+                Text(
+                    "No auth key set — browser login will be used on first registration.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             OutlinedTextField(
                 value = form.hostname,
                 onValueChange = { value -> onChange { it.copy(hostname = value) } },
@@ -354,6 +423,74 @@ private fun AuthCard(
                     Text("tsnet state + indexes only; stays under app-private storage by default")
                 },
             )
+
+            TextButton(
+                onClick = { showAuthKeySection = !showAuthKeySection },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = if (showAuthKeySection) {
+                        Icons.Default.ExpandLess
+                    } else {
+                        Icons.Default.ExpandMore
+                    },
+                    contentDescription = null,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (showAuthKeySection) {
+                        "Hide auth key option"
+                    } else {
+                        "Use auth key instead (advanced)"
+                    },
+                )
+            }
+
+            if (showAuthKeySection) {
+                Text(
+                    "Optional. When set, used for tsnet registration instead of browser login. " +
+                        "Stored with EncryptedSharedPreferences and never logged. Leave blank " +
+                        "for interactive browser sign-in.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = form.authKey,
+                    onValueChange = { value -> onChange { it.copy(authKey = value) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled,
+                    label = { Text("Auth key (optional)") },
+                    singleLine = true,
+                    visualTransformation = if (showKey) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }, enabled = enabled) {
+                            Icon(
+                                imageVector = if (showKey) {
+                                    Icons.Default.VisibilityOff
+                                } else {
+                                    Icons.Default.Visibility
+                                },
+                                contentDescription = if (showKey) {
+                                    "Hide auth key"
+                                } else {
+                                    "Show auth key"
+                                },
+                            )
+                        }
+                    },
+                    supportingText = {
+                        when {
+                            form.authKey.isNotBlank() -> Text("Key will be saved securely")
+                            hasStoredAuthKey -> Text("A key is stored securely on this device")
+                            else -> Text("Optional — browser login is the default")
+                        }
+                    },
+                )
+            }
         }
     }
 }

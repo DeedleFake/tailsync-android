@@ -65,12 +65,15 @@ class MainViewModel(
         val lastError: String?,
         val engineVersion: String?,
         val logLines: List<String>,
+        val needsLogin: Boolean,
+        val authUrl: String?,
     )
 
     init {
         if (settingsRepo.consumeAuthKeyResetNotice()) {
             _saveMessage.value =
-                "Secure storage was reset — re-enter your Tailscale auth key."
+                "Secure storage was reset — optional auth key was cleared. " +
+                    "Use browser login or re-enter a key."
         }
         // After process death: if user wanted the service, request start (sets pending).
         // Do not set pending alone without a start attempt — that hard-locks the switch.
@@ -163,6 +166,8 @@ class MainViewModel(
             lastError = lastError,
             engineVersion = TailsyncRuntime.engineVersion.value,
             logLines = TailsyncRuntime.logLines.value,
+            needsLogin = TailsyncRuntime.needsLogin.value,
+            authUrl = TailsyncRuntime.authUrl.value,
         )
     }
 
@@ -170,8 +175,15 @@ class MainViewModel(
         runtimeSlice,
         TailsyncRuntime.engineVersion,
         TailsyncRuntime.logLines,
-    ) { slice, version, logs ->
-        slice.copy(engineVersion = version, logLines = logs)
+        TailsyncRuntime.needsLogin,
+        TailsyncRuntime.authUrl,
+    ) { slice, version, logs, needsLogin, authUrl ->
+        slice.copy(
+            engineVersion = version,
+            logLines = logs,
+            needsLogin = needsLogin,
+            authUrl = authUrl,
+        )
     }
 
     // Three-way combine avoids the awkward 5+1 nested pattern for all-files access.
@@ -223,6 +235,8 @@ class MainViewModel(
             hasStoredAuthKey = form.hasStoredAuthKey,
             hasAllFilesAccess = allFiles,
             canPickDirectory = formEnabled && allFiles,
+            needsLogin = runtime.needsLogin,
+            authUrl = runtime.authUrl,
         )
     }.stateIn(
         viewModelScope,
@@ -254,6 +268,8 @@ class MainViewModel(
             hasStoredAuthKey = _hasStoredAuthKey.value,
             hasAllFilesAccess = allFiles,
             canPickDirectory = formEnabled && allFiles,
+            needsLogin = TailsyncRuntime.needsLogin.value,
+            authUrl = TailsyncRuntime.authUrl.value,
         )
     }
 
@@ -345,7 +361,8 @@ class MainViewModel(
         _hasStoredAuthKey.value = settingsRepo.hasAuthKey()
         if (settingsRepo.consumeAuthKeyResetNotice()) {
             _saveMessage.value =
-                "Secure storage was reset — re-enter your Tailscale auth key."
+                "Secure storage was reset — optional auth key was cleared. " +
+                    "Use browser login or re-enter a key."
             return true
         }
         if (showMessage) {
@@ -481,6 +498,7 @@ class MainViewModel(
         if (json.isNullOrBlank()) return null
         return try {
             val o = JSONObject(json)
+            val auth = AuthSignals.parseAuthStatus(json)
             StatusSummary(
                 running = o.optBoolean("running", false),
                 phase = o.optString("phase", "unknown"),
@@ -494,6 +512,8 @@ class MainViewModel(
                 syncIntervalMs = o.optLong("sync_interval_ms", 0L),
                 blockSize = o.optInt("block_size", 0),
                 version = o.optString("version", ""),
+                needsLogin = auth.needsLogin,
+                authUrl = auth.authUrl,
             )
         } catch (_: Exception) {
             null
@@ -589,6 +609,8 @@ data class StatusSummary(
     val syncIntervalMs: Long,
     val blockSize: Int,
     val version: String,
+    val needsLogin: Boolean = false,
+    val authUrl: String? = null,
 )
 
 data class UiState(
@@ -609,6 +631,8 @@ data class UiState(
     val hasStoredAuthKey: Boolean,
     val hasAllFilesAccess: Boolean,
     val canPickDirectory: Boolean,
+    val needsLogin: Boolean = false,
+    val authUrl: String? = null,
 )
 
 private fun UserSettings.toFormState(): FormState = FormState(
