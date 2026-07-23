@@ -13,6 +13,8 @@ class TailsyncApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         settingsRepository = SettingsRepository(this)
+        // tsnet needs HOME / TS_LOGS_DIR before Up (else panic + process abort).
+        TsnetAndroidEnv.apply(this)
         // Required gomobile init for Go↔JVM callbacks on Android.
         Seq.setContext(applicationContext)
         Mobile.touch()

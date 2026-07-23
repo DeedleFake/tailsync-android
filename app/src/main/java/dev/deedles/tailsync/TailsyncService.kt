@@ -102,15 +102,21 @@ class TailsyncService : LifecycleService() {
                     }
                 }
                 // Do not re-enter startNode; service may already be starting.
-                return START_STICKY
+                return stickyIfRunning()
             }
             else -> {
                 startInForeground(getString(R.string.notification_text_starting))
                 startNode()
             }
         }
-        return START_STICKY
+        // Until the node is fully up, do not START_STICKY — a native abort
+        // (e.g. tsnet panic) would otherwise restart the service in a loop.
+        return stickyIfRunning()
     }
+
+    /** Sticky only after a successful Start so crash-during-start does not loop. */
+    private fun stickyIfRunning(): Int =
+        if (TailsyncRuntime.nodeRunning.value) START_STICKY else START_NOT_STICKY
 
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
@@ -200,6 +206,9 @@ class TailsyncService : LifecycleService() {
         TailsyncRuntime.setPhase("starting")
         TailsyncRuntime.clearLogs()
         TailsyncRuntime.appendLog("Starting node…")
+
+        // Ensure HOME/TS_LOGS_DIR even if Application path was skipped in tests.
+        TsnetAndroidEnv.apply(applicationContext)
 
         if (!stillOwner(gen)) return
 

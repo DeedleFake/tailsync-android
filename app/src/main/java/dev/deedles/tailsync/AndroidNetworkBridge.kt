@@ -33,6 +33,9 @@ object AndroidNetworkBridge {
     const val FLAG_MULTICAST: Int = 16
     const val FLAG_RUNNING: Int = 32
 
+    /** Serialize all Go Mobile network calls (callbacks + start race). */
+    private val publishLock = Any()
+
     @Volatile
     private var callback: ConnectivityManager.NetworkCallback? = null
 
@@ -68,22 +71,24 @@ object AndroidNetworkBridge {
      * so a running tsnet netmon re-evaluates (no-op if not yet running).
      */
     fun publish(snapshot: Snapshot, notify: Boolean = false) {
-        try {
-            Mobile.setNetworkInterfacesJSON(snapshot.interfacesJson)
-            Mobile.setDefaultRouteInterface(snapshot.defaultInterface)
-            Mobile.setDefaultGateway(snapshot.defaultGateway)
-            if (notify) {
-                Mobile.notifyNetworkChange()
+        synchronized(publishLock) {
+            try {
+                Mobile.setNetworkInterfacesJSON(snapshot.interfacesJson)
+                Mobile.setDefaultRouteInterface(snapshot.defaultInterface)
+                Mobile.setDefaultGateway(snapshot.defaultGateway)
+                if (notify) {
+                    Mobile.notifyNetworkChange()
+                }
+                Log.i(
+                    TAG,
+                    "Published ${snapshot.interfaceCount} interface(s) " +
+                        "defaultIf=${snapshot.defaultInterface.ifBlank { "(none)" }} " +
+                        "gw=${snapshot.defaultGateway.ifBlank { "(none)" }} notify=$notify",
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to publish network snapshot to Go", e)
+                throw e
             }
-            Log.i(
-                TAG,
-                "Published ${snapshot.interfaceCount} interface(s) " +
-                    "defaultIf=${snapshot.defaultInterface.ifBlank { "(none)" }} " +
-                    "gw=${snapshot.defaultGateway.ifBlank { "(none)" }} notify=$notify",
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to publish network snapshot to Go", e)
-            throw e
         }
     }
 
