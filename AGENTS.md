@@ -25,7 +25,7 @@ Prefer discovering structure from the tree and Gradle files over assuming a layo
 | Build | Gradle Kotlin DSL, version catalog in `gradle/libs.versions.toml` |
 | Module | Single app module `:app` (`applicationId` / namespace `dev.deedles.tailsync`) |
 | Sync engine | `deedles.dev/tailsync/mobile` via gomobile-produced AAR |
-| Network (mobile) | **tsnet** by default (embedded Tailscale node; host LocalAPI is not typical on Android) |
+| Network (mobile) | Always **tsnet** (embedded Tailscale node); host/plain are not used on Android |
 
 Do not pin SDK, AGP, library, or dependency versions in this file (they go stale). Prefer “as specified in `gradle/libs.versions.toml` / module build files” or unversioned names.
 
@@ -63,7 +63,7 @@ Use the project wrapper (`./gradlew`), not a system Gradle install. Exact tasks 
 - **Paths** — pass **absolute, writable** paths into mobile `Config` (e.g. app-private storage under `context.filesDir`).
 - **Lifecycle** — call `Node.Start()` / `Stop()` from a service (or other long-lived component), **off the main thread** (`Start` can block long enough to ANR). Call `Stop` when the service is destroyed.
 - **Events** — `EventListener` runs on a Go background thread; keep handlers fast and post to the main thread only for UI.
-- **Net mode** — default is `"tsnet"`. First registration needs a Tailscale **auth key** (or existing tsnet state under `StateDir`).
+- **Net mode** — always `"tsnet"`. First registration needs a Tailscale **auth key** (or existing tsnet state under `StateDir`). Do not expose host/plain in the UI.
 - **Secrets** — never log, ship, or commit Tailscale auth keys, tokens, or machine-specific secrets. Prefer secure storage (e.g. EncryptedSharedPreferences / Keystore-backed storage) for keys the user provides.
 - **Status** — use `StatusJSON()` / events for UI; auth keys must never appear in status or logs.
 

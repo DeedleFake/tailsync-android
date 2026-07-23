@@ -55,7 +55,6 @@ class MainViewModelTest {
                 scanIntervalMs = 0,
                 syncIntervalMs = 0,
                 blockSize = 0,
-                netMode = "tsnet",
             ),
         )
         gateway = FakeServiceGateway()

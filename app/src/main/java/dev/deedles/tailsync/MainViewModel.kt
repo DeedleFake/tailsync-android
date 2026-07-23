@@ -267,7 +267,6 @@ class MainViewModel(
             scanIntervalMs = form.scanIntervalMs.filter { it.isDigit() },
             syncIntervalMs = form.syncIntervalMs.filter { it.isDigit() },
             blockSize = form.blockSize.filter { it.isDigit() },
-            netMode = form.netMode.ifBlank { "tsnet" },
         )
         _form.value = validated
         settingsRepo.save(validated.toUserSettings(settingsRepo))
@@ -408,7 +407,6 @@ class MainViewModel(
                 stateDir = o.optString("state_dir", ""),
                 hostname = o.optString("hostname", ""),
                 port = o.optInt("port", 0),
-                netMode = o.optString("net_mode", ""),
                 service = o.optString("service", ""),
                 peers = o.optString("peers", ""),
                 scanIntervalMs = o.optLong("scan_interval_ms", 0L),
@@ -464,7 +462,6 @@ data class FormState(
     val scanIntervalMs: String = "",
     val syncIntervalMs: String = "",
     val blockSize: String = "",
-    val netMode: String = "tsnet",
     val treeUri: String? = null,
 )
 
@@ -475,7 +472,6 @@ data class StatusSummary(
     val stateDir: String,
     val hostname: String,
     val port: Int,
-    val netMode: String,
     val service: String,
     val peers: String,
     val scanIntervalMs: Long,
@@ -513,7 +509,6 @@ private fun UserSettings.toFormState(): FormState = FormState(
     scanIntervalMs = if (scanIntervalMs == 0L) "" else scanIntervalMs.toString(),
     syncIntervalMs = if (syncIntervalMs == 0L) "" else syncIntervalMs.toString(),
     blockSize = if (blockSize == 0) "" else blockSize.toString(),
-    netMode = netMode.ifBlank { "tsnet" },
     treeUri = treeUri,
 )
 
@@ -528,6 +523,5 @@ private fun FormState.toUserSettings(repo: SettingsStore): UserSettings = UserSe
     scanIntervalMs = SettingsValidation.nonNegativeLong(scanIntervalMs),
     syncIntervalMs = SettingsValidation.nonNegativeLong(syncIntervalMs),
     blockSize = SettingsValidation.nonNegativeInt(blockSize),
-    netMode = netMode.trim().ifBlank { "tsnet" },
     treeUri = treeUri,
 )

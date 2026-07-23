@@ -75,7 +75,6 @@ class SettingsRepository(context: Context) : SettingsStore {
             scanIntervalMs = prefs.getLong(KEY_SCAN_MS, 0L).coerceAtLeast(0L),
             syncIntervalMs = prefs.getLong(KEY_SYNC_MS, 0L).coerceAtLeast(0L),
             blockSize = prefs.getInt(KEY_BLOCK_SIZE, 0).coerceAtLeast(0),
-            netMode = prefs.getString(KEY_NET_MODE, "tsnet") ?: "tsnet",
             treeUri = prefs.getString(KEY_TREE_URI, null),
         )
     }
@@ -91,7 +90,8 @@ class SettingsRepository(context: Context) : SettingsStore {
             putLong(KEY_SCAN_MS, settings.scanIntervalMs.coerceAtLeast(0L))
             putLong(KEY_SYNC_MS, settings.syncIntervalMs.coerceAtLeast(0L))
             putInt(KEY_BLOCK_SIZE, settings.blockSize.coerceAtLeast(0))
-            putString(KEY_NET_MODE, settings.netMode.ifBlank { "tsnet" })
+            // Drop legacy net_mode preference (always tsnet on Android).
+            remove(KEY_NET_MODE)
             if (settings.treeUri.isNullOrBlank()) {
                 remove(KEY_TREE_URI)
             } else {
@@ -205,6 +205,7 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_SCAN_MS = "scan_interval_ms"
         private const val KEY_SYNC_MS = "sync_interval_ms"
         private const val KEY_BLOCK_SIZE = "block_size"
+        /** Legacy key; removed on save. Android always uses tsnet. */
         private const val KEY_NET_MODE = "net_mode"
         private const val KEY_TREE_URI = "tree_uri"
         private const val KEY_SERVICE_WANTED = "service_wanted"
@@ -222,6 +223,5 @@ data class UserSettings(
     val scanIntervalMs: Long,
     val syncIntervalMs: Long,
     val blockSize: Int,
-    val netMode: String,
     val treeUri: String? = null,
 )

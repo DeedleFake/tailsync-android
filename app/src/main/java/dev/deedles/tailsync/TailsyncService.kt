@@ -200,7 +200,9 @@ class TailsyncService : LifecycleService() {
             scanIntervalMs = user.scanIntervalMs
             syncIntervalMs = user.syncIntervalMs
             blockSize = user.blockSize.toLong()
-            netMode = user.netMode.ifBlank { "tsnet" }
+            // Android always uses embedded tsnet (host LocalAPI / plain TCP
+            // are desktop or test-only and are not exposed in the UI).
+            netMode = "tsnet"
         }
 
         val created = try {

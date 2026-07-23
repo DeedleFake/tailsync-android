@@ -21,7 +21,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -214,7 +213,6 @@ private fun StatusRows(summary: StatusSummary) {
         "State dir" to summary.stateDir.ifBlank { "—" },
         "Hostname" to summary.hostname.ifBlank { "—" },
         "Port" to summary.port.toString(),
-        "Net mode" to summary.netMode,
         "Service filter" to summary.service.ifBlank { "—" },
         "Peers" to summary.peers.ifBlank { "(discovery)" },
         "Scan ms" to summary.scanIntervalMs.toString(),
@@ -378,21 +376,9 @@ private fun ConfigCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Node configuration", style = MaterialTheme.typography.titleMedium)
-
-            Text("Network mode", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("tsnet", "host", "plain").forEach { mode ->
-                    FilterChip(
-                        selected = form.netMode == mode,
-                        onClick = { onChange { it.copy(netMode = mode) } },
-                        enabled = enabled,
-                        label = { Text(mode) },
-                    )
-                }
-            }
             Text(
-                "Use tsnet on Android (embedded Tailscale). host needs system tailscaled; " +
-                    "plain is localhost-only for tests.",
+                "This app always uses tsnet (an embedded Tailscale node). " +
+                    "Desktop host/plain modes are not available on Android.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
