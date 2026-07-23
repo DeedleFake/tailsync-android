@@ -8,7 +8,7 @@ import java.io.File
  * the UI and the foreground service.
  */
 interface SettingsStore {
-    fun defaultSyncDir(): File
+    /** App-private state/index + tsnet dir (not the user sync root). */
     fun defaultStateDir(): File
     fun hasAuthKey(): Boolean
     fun consumeAuthKeyResetNotice(): Boolean

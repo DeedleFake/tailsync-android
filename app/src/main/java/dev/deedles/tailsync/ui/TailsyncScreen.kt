@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,6 +55,7 @@ import dev.deedles.tailsync.UiState
 fun TailsyncScreen(
     viewModel: MainViewModel,
     onPickDirectory: () -> Unit,
+    onGrantAllFilesAccess: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -76,6 +78,9 @@ fun TailsyncScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (!state.hasAllFilesAccess) {
+                AllFilesAccessCard(onGrant = onGrantAllFilesAccess)
+            }
             ServiceCard(state = state, onToggle = viewModel::setServiceEnabled)
             if (!state.formEnabled) {
                 Text(
@@ -104,9 +109,11 @@ fun TailsyncScreen(
                 form = state.form,
                 pathHint = state.pathHint,
                 enabled = state.formEnabled,
+                canPickDirectory = state.canPickDirectory,
+                hasAllFilesAccess = state.hasAllFilesAccess,
                 onChange = viewModel::updateForm,
                 onPickDirectory = onPickDirectory,
-                onUseDefault = viewModel::useDefaultSyncDir,
+                onGrantAllFilesAccess = onGrantAllFilesAccess,
             )
             ConfigCard(
                 form = state.form,
@@ -132,6 +139,49 @@ fun TailsyncScreen(
                 )
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun AllFilesAccessCard(onGrant: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "All files access required",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+            Text(
+                "Tailsync needs all-files access so it can sync any folder you choose " +
+                    "using real filesystem paths (required by the sync engine). " +
+                    "Without this permission, folder picks cannot be used as a sync root. " +
+                    "App-private storage is not a sync destination.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Button(
+                onClick = onGrant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Grant all files access")
+            }
         }
     }
 }
@@ -301,7 +351,7 @@ private fun AuthCard(
                 label = { Text("State directory (absolute)") },
                 singleLine = true,
                 supportingText = {
-                    Text("tsnet state + indexes; defaults under app files dir")
+                    Text("tsnet state + indexes only; stays under app-private storage by default")
                 },
             )
         }
@@ -313,17 +363,20 @@ private fun DirectoryCard(
     form: FormState,
     pathHint: String?,
     enabled: Boolean,
+    canPickDirectory: Boolean,
+    hasAllFilesAccess: Boolean,
     onChange: ((FormState) -> FormState) -> Unit,
     onPickDirectory: () -> Unit,
-    onUseDefault: () -> Unit,
+    onGrantAllFilesAccess: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Sync directory", style = MaterialTheme.typography.titleMedium)
             Text(
-                "The engine needs an absolute, writable filesystem path. " +
-                    "App-private storage is the supported default. SAF picks only apply " +
-                    "when they resolve to a real path (often not possible for Downloads).",
+                "Choose any folder to sync. The engine needs an absolute, writable path. " +
+                    "With all-files access, picking a folder on primary storage (or a " +
+                    "supported secondary volume) resolves to a real path. " +
+                    "State and tsnet data stay app-private — not this folder.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -334,15 +387,29 @@ private fun DirectoryCard(
                 enabled = enabled,
                 label = { Text("Sync dir (absolute path)") },
                 singleLine = true,
+                placeholder = { Text("Pick a folder…") },
+                supportingText = {
+                    if (form.syncDir.isBlank()) {
+                        Text("Required — no default sync folder")
+                    }
+                },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onPickDirectory, enabled = enabled) {
+                OutlinedButton(
+                    onClick = onPickDirectory,
+                    enabled = canPickDirectory,
+                ) {
                     Icon(Icons.Default.FolderOpen, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Pick folder")
                 }
-                OutlinedButton(onClick = onUseDefault, enabled = enabled) {
-                    Text("App default")
+                if (!hasAllFilesAccess) {
+                    OutlinedButton(
+                        onClick = onGrantAllFilesAccess,
+                        enabled = enabled,
+                    ) {
+                        Text("Grant access")
+                    }
                 }
             }
             form.treeUri?.let {

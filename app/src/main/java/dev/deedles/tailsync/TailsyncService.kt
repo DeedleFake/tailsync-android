@@ -169,17 +169,54 @@ class TailsyncService : LifecycleService() {
 
         if (!stillOwner(gen)) return
 
-        val user = settings.load()
-        val syncDirFile = PathUtils.ensureDir(user.syncDir)
-        val stateDirFile = PathUtils.ensureDir(user.stateDir)
+        if (!StorageAccess.hasAllFilesAccess()) {
+            if (stillOwner(gen)) {
+                failAndStop(
+                    "All files access is required to sync a folder. " +
+                        "Grant it in system settings, then start again.",
+                )
+            }
+            return
+        }
 
-        if (!PathUtils.isAbsoluteWritable(syncDirFile.absolutePath)) {
+        val user = settings.load()
+        val syncPath = user.syncDir.trim()
+        val statePath = user.stateDir.trim()
+        // Validate without creating (isAbsoluteWritable never mkdirs).
+        if (syncPath.isBlank() || !PathUtils.isAbsoluteWritable(syncPath)) {
+            if (stillOwner(gen)) {
+                failAndStop(
+                    if (syncPath.isBlank()) {
+                        "No sync folder selected — pick an absolute writable path first"
+                    } else {
+                        "Sync directory is not writable: $syncPath"
+                    },
+                )
+            }
+            return
+        }
+        if (statePath.isBlank() || !PathUtils.isAbsoluteWritable(statePath)) {
+            if (stillOwner(gen)) {
+                failAndStop(
+                    if (statePath.isBlank()) {
+                        "State directory must be an absolute writable path"
+                    } else {
+                        "State directory is not writable: $statePath"
+                    },
+                )
+            }
+            return
+        }
+        // Create only after validation commits.
+        val syncDirFile = PathUtils.ensureDir(syncPath)
+        val stateDirFile = PathUtils.ensureDir(statePath)
+        if (!syncDirFile.isDirectory || !syncDirFile.canWrite()) {
             if (stillOwner(gen)) {
                 failAndStop("Sync directory is not writable: ${syncDirFile.absolutePath}")
             }
             return
         }
-        if (!PathUtils.isAbsoluteWritable(stateDirFile.absolutePath)) {
+        if (!stateDirFile.isDirectory || !stateDirFile.canWrite()) {
             if (stillOwner(gen)) {
                 failAndStop("State directory is not writable: ${stateDirFile.absolutePath}")
             }

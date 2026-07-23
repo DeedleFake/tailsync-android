@@ -30,8 +30,6 @@ class SettingsRepository(context: Context) : SettingsStore {
     @Volatile
     private var authKeyWasReset: Boolean = false
 
-    override fun defaultSyncDir(): File = File(appContext.filesDir, DEFAULT_SYNC_SUBDIR)
-
     override fun defaultStateDir(): File = File(appContext.filesDir, DEFAULT_STATE_SUBDIR)
 
     /** True if a non-blank auth key is present in encrypted storage. */
@@ -58,9 +56,8 @@ class SettingsRepository(context: Context) : SettingsStore {
     }
 
     override fun load(): UserSettings {
-        val syncDir = prefs.getString(KEY_SYNC_DIR, null)
-            ?.takeIf { it.isNotBlank() }
-            ?: defaultSyncDir().absolutePath
+        // Sync root is unset until the user picks a folder (no app-private product default).
+        val syncDir = prefs.getString(KEY_SYNC_DIR, null)?.takeIf { it.isNotBlank() } ?: ""
         val stateDir = prefs.getString(KEY_STATE_DIR, null)
             ?.takeIf { it.isNotBlank() }
             ?: defaultStateDir().absolutePath
@@ -192,7 +189,6 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val TAG = "SettingsRepository"
         private const val PREFS_NAME = "tailsync_settings"
         private const val SECURE_PREFS_NAME = "tailsync_secure"
-        private const val DEFAULT_SYNC_SUBDIR = "sync"
         private const val DEFAULT_STATE_SUBDIR = "tailsync-state"
 
         private const val KEY_SYNC_DIR = "sync_dir"

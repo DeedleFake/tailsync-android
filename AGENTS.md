@@ -60,7 +60,8 @@ Use the project wrapper (`./gradlew`), not a system Gradle install. Exact tasks 
 
 ## Android integration notes
 
-- **Paths** — pass **absolute, writable** paths into mobile `Config` (e.g. app-private storage under `context.filesDir`).
+- **Sync dir (Config.Dir)** — user-chosen **absolute, writable** path on shared storage. Requires **`MANAGE_EXTERNAL_STORAGE`** (all-files access) so SAF tree picks can resolve to real filesystem paths. **Do not** use app-private storage (`filesDir/sync`) as the product sync root or as a silent fallback when pick/permission fails. Gate start and folder pick on `Environment.isExternalStorageManager()`.
+- **State dir (Config.StateDir)** — remains **app-private** (index + tsnet state under `context.filesDir`). Not user-facing as “where my files live.”
 - **Lifecycle** — call `Node.Start()` / `Stop()` from a service (or other long-lived component), **off the main thread** (`Start` can block long enough to ANR). Call `Stop` when the service is destroyed.
 - **Events** — `EventListener` runs on a Go background thread; keep handlers fast and post to the main thread only for UI.
 - **Net mode** — always `"tsnet"`. First registration needs a Tailscale **auth key** (or existing tsnet state under `StateDir`). Do not expose host/plain in the UI.

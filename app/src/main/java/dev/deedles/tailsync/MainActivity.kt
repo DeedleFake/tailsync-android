@@ -24,10 +24,15 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
+    private val manageAllFiles =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            viewModel.refreshStoragePermission()
+        }
+
     private val openTree =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
-                // Persist read/write access to the picked tree for later sessions.
+                // Best-effort persistent URI grant; the engine uses the absolute path.
                 try {
                     contentResolver.takePersistableUriPermission(
                         uri,
@@ -51,10 +56,32 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     TailsyncScreen(
                         viewModel = viewModel,
-                        onPickDirectory = { openTree.launch(null) },
+                        onPickDirectory = {
+                            if (StorageAccess.hasAllFilesAccess()) {
+                                openTree.launch(null)
+                            } else {
+                                viewModel.refreshStoragePermission()
+                                openAllFilesSettings()
+                            }
+                        },
+                        onGrantAllFilesAccess = { openAllFilesSettings() },
                     )
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshStoragePermission()
+    }
+
+    private fun openAllFilesSettings() {
+        try {
+            manageAllFiles.launch(StorageAccess.manageAllFilesIntent(this))
+        } catch (_: Exception) {
+            // Device without the settings activity — still refresh state.
+            viewModel.refreshStoragePermission()
         }
     }
 

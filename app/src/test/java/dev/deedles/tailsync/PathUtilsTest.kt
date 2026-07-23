@@ -1,6 +1,7 @@
 package dev.deedles.tailsync
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -27,13 +28,19 @@ class PathUtilsTest {
     }
 
     @Test
+    fun treeDocumentId_secondaryNested() {
+        val path = PathUtils.treeDocumentIdToAbsolutePath("XXXX-YYYY:Android/data")
+        assertEquals("/storage/XXXX-YYYY/Android/data", path)
+    }
+
+    @Test
     fun treeDocumentId_invalid() {
         assertNull(PathUtils.treeDocumentIdToAbsolutePath("nocolon"))
         assertNull(PathUtils.treeDocumentIdToAbsolutePath(""))
     }
 
     @Test
-    fun isAbsoluteWritable_tempDir() {
+    fun isAbsoluteWritable_existingTempDir() {
         val dir = File.createTempFile("tailsync", "dir").apply {
             delete()
             mkdirs()
@@ -46,8 +53,41 @@ class PathUtilsTest {
     }
 
     @Test
-    fun isAbsoluteWritable_rejectsRelative() {
-        assertTrue(!PathUtils.isAbsoluteWritable("relative/path"))
-        assertTrue(!PathUtils.isAbsoluteWritable(""))
+    fun isAbsoluteWritable_rejectsRelativeAndBlank() {
+        assertFalse(PathUtils.isAbsoluteWritable("relative/path"))
+        assertFalse(PathUtils.isAbsoluteWritable(""))
+        assertFalse(PathUtils.isAbsoluteWritable("   "))
+    }
+
+    @Test
+    fun isAbsoluteWritable_doesNotCreateMissingDir() {
+        val base = File.createTempFile("tailsync", "base").apply {
+            delete()
+            mkdirs()
+        }
+        val child = File(base, "does-not-exist-yet")
+        try {
+            // Parent writable → validation succeeds without creating the child.
+            assertTrue(PathUtils.isAbsoluteWritable(child.absolutePath))
+            assertFalse(child.exists())
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun ensureDir_createsMissing() {
+        val base = File.createTempFile("tailsync", "ens").apply {
+            delete()
+            mkdirs()
+        }
+        val child = File(base, "created")
+        try {
+            assertFalse(child.exists())
+            PathUtils.ensureDir(child.absolutePath)
+            assertTrue(child.isDirectory)
+        } finally {
+            base.deleteRecursively()
+        }
     }
 }

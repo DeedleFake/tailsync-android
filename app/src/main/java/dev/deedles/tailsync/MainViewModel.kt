@@ -23,6 +23,8 @@ class MainViewModel(
     private val serviceGateway: ServiceGateway,
     private val isPathWritable: (String) -> Boolean = PathUtils::isAbsoluteWritable,
     private val ensureDir: (String) -> Unit = { PathUtils.ensureDir(it) },
+    private val hasAllFilesAccess: () -> Boolean = StorageAccess::hasAllFilesAccess,
+    private val treeUriToPath: (Uri) -> String? = PathUtils::treeUriToAbsolutePath,
     private val pendingStartTimeoutMs: Long = PENDING_START_TIMEOUT_MS,
 ) : ViewModel() {
 
@@ -32,10 +34,13 @@ class MainViewModel(
     private val _saveMessage = MutableStateFlow<String?>(null)
     val saveMessage: StateFlow<String?> = _saveMessage
 
+    private val _hasAllFilesAccess = MutableStateFlow(hasAllFilesAccess())
+
+    private val _pathHintKind = MutableStateFlow(
+        if (_hasAllFilesAccess.value) PathHintKind.DefaultGranted else PathHintKind.DefaultDenied,
+    )
     private val _pathHint = MutableStateFlow<String?>(
-        "Supported path: app-private storage always works. " +
-            "\"Pick folder\" rarely yields a writable filesystem path for " +
-            "Downloads/SAF trees without all-files access.",
+        pathHintText(_pathHintKind.value),
     )
     val pathHint: StateFlow<String?> = _pathHint
 
@@ -44,6 +49,9 @@ class MainViewModel(
 
     /** Exposed for unit tests. */
     internal val pendingEnabled: StateFlow<Boolean?> = _pendingEnabled
+
+    /** Exposed for unit tests. */
+    internal val pathHintKind: StateFlow<PathHintKind> = _pathHintKind
 
     private var pendingTimeoutJob: Job? = null
 
@@ -57,14 +65,6 @@ class MainViewModel(
         val lastError: String?,
         val engineVersion: String?,
         val logLines: List<String>,
-    )
-
-    private data class LocalSlice(
-        val form: FormState,
-        val saveMessage: String?,
-        val pathHint: String?,
-        val pendingEnabled: Boolean?,
-        val hasStoredAuthKey: Boolean,
     )
 
     init {
@@ -174,21 +174,32 @@ class MainViewModel(
         slice.copy(engineVersion = version, logLines = logs)
     }
 
-    private val localSlice = combine(
+    // Three-way combine avoids the awkward 5+1 nested pattern for all-files access.
+    private val formSlice = combine(
         _form,
         _saveMessage,
         _pathHint,
         _pendingEnabled,
         _hasStoredAuthKey,
     ) { form, saveMessage, pathHint, pendingEnabled, hasStoredAuthKey ->
-        LocalSlice(form, saveMessage, pathHint, pendingEnabled, hasStoredAuthKey)
+        FormSlice(form, saveMessage, pathHint, pendingEnabled, hasStoredAuthKey)
     }
 
-    val uiState: StateFlow<UiState> = combine(runtimeFull, localSlice) { runtime, local ->
-        val pending = local.pendingEnabled
+    private data class FormSlice(
+        val form: FormState,
+        val saveMessage: String?,
+        val pathHint: String?,
+        val pendingEnabled: Boolean?,
+        val hasStoredAuthKey: Boolean,
+    )
+
+    val uiState: StateFlow<UiState> = combine(
+        runtimeFull,
+        formSlice,
+        _hasAllFilesAccess,
+    ) { runtime, form, allFiles ->
+        val pending = form.pendingEnabled
         val switchChecked = pending ?: runtime.serviceRunning
-        // Keep the switch interactive so the user can always cancel a pending start.
-        // Only briefly treat "stopping" as non-interactive for form; switch stays enabled.
         val formEnabled = computeFormEnabled(
             serviceRunning = runtime.serviceRunning,
             phase = runtime.phase,
@@ -202,14 +213,16 @@ class MainViewModel(
             lastError = runtime.lastError,
             engineVersion = runtime.engineVersion,
             logLines = runtime.logLines,
-            form = local.form,
-            saveMessage = local.saveMessage,
-            pathHint = local.pathHint,
+            form = form.form,
+            saveMessage = form.saveMessage,
+            pathHint = form.pathHint,
             statusSummary = summarizeStatus(runtime.statusJson),
             switchChecked = switchChecked,
             switchEnabled = true,
             formEnabled = formEnabled,
-            hasStoredAuthKey = local.hasStoredAuthKey,
+            hasStoredAuthKey = form.hasStoredAuthKey,
+            hasAllFilesAccess = allFiles,
+            canPickDirectory = formEnabled && allFiles,
         )
     }.stateIn(
         viewModelScope,
@@ -221,6 +234,8 @@ class MainViewModel(
         val running = TailsyncRuntime.serviceRunning.value
         val phase = TailsyncRuntime.phase.value
         val pending = _pendingEnabled.value
+        val allFiles = _hasAllFilesAccess.value
+        val formEnabled = computeFormEnabled(running, phase, pending)
         return UiState(
             serviceRunning = running,
             nodeRunning = TailsyncRuntime.nodeRunning.value,
@@ -235,9 +250,66 @@ class MainViewModel(
             statusSummary = summarizeStatus(TailsyncRuntime.statusJson.value),
             switchChecked = pending ?: running,
             switchEnabled = true,
-            formEnabled = computeFormEnabled(running, phase, pending),
+            formEnabled = formEnabled,
             hasStoredAuthKey = _hasStoredAuthKey.value,
+            hasAllFilesAccess = allFiles,
+            canPickDirectory = formEnabled && allFiles,
         )
+    }
+
+    private fun setPathHint(kind: PathHintKind, detail: String? = null) {
+        _pathHintKind.value = kind
+        _pathHint.value = pathHintText(kind, detail)
+    }
+
+    /**
+     * Re-check all-files access (e.g. after returning from system settings).
+     * If access is lost while the service is wanted/running, stop and clear wanted.
+     */
+    fun refreshStoragePermission() {
+        val previouslyGranted = _hasAllFilesAccess.value
+        val granted = hasAllFilesAccess()
+        _hasAllFilesAccess.value = granted
+        if (!granted) {
+            setPathHint(PathHintKind.DefaultDenied)
+            val active = previouslyGranted ||
+                TailsyncRuntime.serviceRunning.value ||
+                settingsRepo.isServiceWanted() ||
+                _pendingEnabled.value == true
+            if (active) {
+                stopDueToMissingAllFilesAccess()
+            }
+        } else {
+            // Replace only default/permission hints; keep Resolved / ResolveFailed.
+            when (_pathHintKind.value) {
+                PathHintKind.DefaultDenied,
+                PathHintKind.DefaultGranted,
+                PathHintKind.NeedAccessToPick,
+                -> setPathHint(PathHintKind.DefaultGranted)
+                PathHintKind.Resolved,
+                PathHintKind.ResolveFailed,
+                -> Unit
+            }
+        }
+    }
+
+    private fun stopDueToMissingAllFilesAccess() {
+        val needStop = settingsRepo.isServiceWanted() ||
+            TailsyncRuntime.serviceRunning.value ||
+            _pendingEnabled.value == true
+        if (!needStop) return
+        val msg =
+            "All files access was revoked — sync stopped. Grant access again to continue."
+        pendingTimeoutJob?.cancel()
+        pendingTimeoutJob = null
+        settingsRepo.setServiceWanted(false)
+        _pendingEnabled.value = false
+        TailsyncRuntime.setLastError(msg)
+        _saveMessage.value = msg
+        serviceGateway.stop()
+        if (!TailsyncRuntime.serviceRunning.value) {
+            _pendingEnabled.value = null
+        }
     }
 
     fun updateForm(transform: (FormState) -> FormState) {
@@ -296,13 +368,27 @@ class MainViewModel(
             persistForm(showMessage = false)
         }
 
-        val sync = _form.value.syncDir.trim()
-        val state = _form.value.stateDir.trim()
-        if (!isPathWritable(sync)) {
-            abandonPendingStart(message = "Sync directory must be an absolute writable path")
+        if (!hasAllFilesAccess()) {
+            _hasAllFilesAccess.value = false
+            setPathHint(PathHintKind.DefaultDenied)
+            abandonPendingStart(
+                message = "All files access is required to sync a folder. " +
+                    "Grant it in system settings, then try again.",
+            )
             return
         }
-        if (!isPathWritable(state)) {
+        _hasAllFilesAccess.value = true
+
+        val sync = _form.value.syncDir.trim()
+        val state = _form.value.stateDir.trim()
+        // Validation only — does not create directories on shared storage.
+        if (sync.isBlank() || !isPathWritable(sync)) {
+            abandonPendingStart(
+                message = "Pick a sync folder (absolute writable path required)",
+            )
+            return
+        }
+        if (state.isBlank() || !isPathWritable(state)) {
             abandonPendingStart(message = "State directory must be an absolute writable path")
             return
         }
@@ -326,47 +412,42 @@ class MainViewModel(
         }
     }
 
-    fun useDefaultSyncDir() {
-        if (!uiState.value.formEnabled) return
-        val sync = settingsRepo.defaultSyncDir().absolutePath
-        val state = settingsRepo.defaultStateDir().absolutePath
-        ensureDir(sync)
-        ensureDir(state)
-        _form.update {
-            it.copy(syncDir = sync, stateDir = state, treeUri = null)
-        }
-        _pathHint.value =
-            "Using app-private storage (supported default). " +
-                "The Go engine requires absolute writable paths."
+    /**
+     * Handles a SAF tree selection. Requires all-files access so the tree can
+     * resolve to an absolute path. Never falls back to app-private storage.
+     */
+    fun onTreePicked(uri: Uri) {
+        applyTreePick(uriString = uri.toString(), resolved = treeUriToPath(uri))
     }
 
-    fun onTreePicked(uri: Uri) {
+    /**
+     * Testable tree-pick entry that avoids Android [Uri] plumbing on the JVM.
+     * Production [onTreePicked] delegates here after resolving the URI.
+     */
+    internal fun applyTreePick(uriString: String, resolved: String?) {
         if (!uiState.value.formEnabled) return
-        val resolved = PathUtils.treeUriToAbsolutePath(uri)
+        if (!hasAllFilesAccess()) {
+            _hasAllFilesAccess.value = false
+            setPathHint(PathHintKind.NeedAccessToPick)
+            _saveMessage.value = "Grant all files access first"
+            return
+        }
         if (resolved != null && isPathWritable(resolved)) {
             ensureDir(resolved)
             _form.update {
                 it.copy(
                     syncDir = resolved,
-                    treeUri = uri.toString(),
+                    treeUri = uriString,
                 )
             }
-            _pathHint.value = "Using resolved path from document tree: $resolved"
+            setPathHint(PathHintKind.Resolved, detail = resolved)
+            // Persist immediately so process death does not lose the pick.
+            persistForm(showMessage = false)
+            _saveMessage.value = null
         } else {
-            val fallback = settingsRepo.defaultSyncDir().absolutePath
-            ensureDir(fallback)
-            _form.update {
-                it.copy(
-                    syncDir = fallback,
-                    treeUri = uri.toString(),
-                )
-            }
-            _pathHint.value =
-                "Could not use the picked folder as a direct filesystem path " +
-                    "(common with scoped storage / Downloads / SAF trees). " +
-                    "Falling back to app-private directory:\n$fallback\n\n" +
-                    "App-private storage remains the supported default without " +
-                    "all-files access."
+            // Do not change syncDir / do not fall back to app-private.
+            setPathHint(PathHintKind.ResolveFailed, detail = resolved)
+            _saveMessage.value = "Folder could not be used as a sync path"
         }
     }
 
@@ -448,7 +529,37 @@ class MainViewModel(
             if (pending == true) return false
             return true
         }
+
+        fun pathHintText(kind: PathHintKind, detail: String? = null): String = when (kind) {
+            PathHintKind.DefaultGranted ->
+                "Pick a folder to sync. Paths resolve via all-files access " +
+                    "(primary storage and common secondary volumes). " +
+                    "State/index stays under app-private storage."
+            PathHintKind.DefaultDenied ->
+                "All files access is required to sync arbitrary folders. " +
+                    "Grant it in system settings, then pick a folder. " +
+                    "App-private storage is not offered as a sync root."
+            PathHintKind.NeedAccessToPick ->
+                "All files access is required before picking a folder. " +
+                    "Grant it, then pick again."
+            PathHintKind.Resolved ->
+                "Using resolved path: ${detail.orEmpty()}"
+            PathHintKind.ResolveFailed ->
+                "Could not resolve the picked folder to a writable filesystem path" +
+                    (if (!detail.isNullOrBlank()) " ($detail)" else "") +
+                    ". Prefer a folder on primary storage (e.g. Downloads) or " +
+                    "another volume under /storage. All-files access must stay granted."
+        }
     }
+}
+
+/** Provenance for the directory path hint (avoids fragile substring matching). */
+enum class PathHintKind {
+    DefaultDenied,
+    DefaultGranted,
+    NeedAccessToPick,
+    Resolved,
+    ResolveFailed,
 }
 
 data class FormState(
@@ -496,6 +607,8 @@ data class UiState(
     val switchEnabled: Boolean,
     val formEnabled: Boolean,
     val hasStoredAuthKey: Boolean,
+    val hasAllFilesAccess: Boolean,
+    val canPickDirectory: Boolean,
 )
 
 private fun UserSettings.toFormState(): FormState = FormState(
@@ -513,7 +626,8 @@ private fun UserSettings.toFormState(): FormState = FormState(
 )
 
 private fun FormState.toUserSettings(repo: SettingsStore): UserSettings = UserSettings(
-    syncDir = syncDir.trim().ifBlank { repo.defaultSyncDir().absolutePath },
+    // Never invent an app-private sync root; blank means user has not chosen yet.
+    syncDir = syncDir.trim(),
     stateDir = stateDir.trim().ifBlank { repo.defaultStateDir().absolutePath },
     hostname = hostname.trim(),
     authKey = authKey.trim(),
