@@ -1,6 +1,7 @@
 package dev.deedles.tailsync
 
 import android.app.Application
+import android.content.Context
 import go.Seq
 import mobile.Mobile
 
@@ -9,6 +10,19 @@ class TailsyncApplication : Application() {
     /** Single app-scoped settings store (shared by UI + service). */
     lateinit var settingsRepository: SettingsRepository
         private set
+
+    /**
+     * Runs before [onCreate] and before most class loading. Set process env
+     * here so it is present if anything loads libgojni early.
+     */
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        // Best-effort before DiagLog exists.
+        try {
+            TsnetAndroidEnv.apply(base)
+        } catch (_: Exception) {
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -19,10 +33,11 @@ class TailsyncApplication : Application() {
             DiagLog.w("Clearing service_wanted after incomplete previous start")
             settingsRepository.setServiceWanted(false)
         }
-        // tsnet needs HOME / TS_LOGS_DIR before Up (else panic + process abort).
+        // Re-apply after DiagLog so env is in the breadcrumb trail.
         DiagLog.i("Application.onCreate: applying tsnet env")
         TsnetAndroidEnv.apply(this)
         // Required gomobile init for Go↔JVM callbacks on Android.
+        // Note: Seq static init loads libgojni — env must already be set.
         DiagLog.i("Application.onCreate: Seq.setContext + Mobile.touch")
         Seq.setContext(applicationContext)
         Mobile.touch()
