@@ -6,14 +6,15 @@ Instructions for AI coding agents working in this repository.
 
 **Tailsync** (this repo) is the **Android app wrapper** for [DeedleFake/tailsync](https://github.com/DeedleFake/tailsync), a Tailscale-based directory synchronization daemon.
 
-The sync engine lives in the Go module (`deedles.dev/tailsync`). This project embeds it on Android via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile) (`deedles.dev/tailsync/mobile` → AAR) and owns:
+The sync engine lives in the Go module (`deedles.dev/tailsync`), public library package `deedles.dev/tailsync/daemon`. This repo owns:
 
+- The gomobile-bindable Go package `./mobile` (wraps `daemon`; builds to `app/libs/tailsync.aar`)
 - App UI and settings
 - Lifecycle (typically a **foreground service**)
 - Paths, auth key storage, and permissions
 - Wiring mobile events/status into Android APIs
 
-Do **not** reimplement the sync protocol or index logic here. Prefer changes in the Go repo when the engine itself needs work; keep this repo focused on Android integration and UX.
+Do **not** reimplement the sync protocol or index logic here. Prefer changes in the Go repo when the engine itself needs work; keep this repo focused on Android integration, the mobile bind surface, and UX.
 
 Prefer discovering structure from the tree and Gradle files over assuming a layout.
 
@@ -24,7 +25,8 @@ Prefer discovering structure from the tree and Gradle files over assuming a layo
 | Language | Kotlin (and Android resources / manifests as needed) |
 | Build | Gradle Kotlin DSL, version catalog in `gradle/libs.versions.toml` |
 | Module | Single app module `:app` (`applicationId` / namespace `dev.deedles.tailsync`) |
-| Sync engine | `deedles.dev/tailsync/mobile` via gomobile-produced AAR |
+| Mobile bind | This repo `./mobile` (module `tailsync-android`) → gomobile AAR (`app/libs/tailsync.aar`) |
+| Sync engine | Go module `deedles.dev/tailsync` (`daemon` package), version-pinned in root `go.mod` |
 | Network (mobile) | Always **tsnet** (embedded Tailscale node); host/plain are not used on Android |
 
 Do not pin SDK, AGP, library, or dependency versions in this file (they go stale). Prefer “as specified in `gradle/libs.versions.toml` / module build files” or unversioned names.
@@ -33,22 +35,26 @@ Do not pin SDK, AGP, library, or dependency versions in this file (they go stale
 
 | Concern | Where it lives |
 |---------|----------------|
-| Protocol, index, scan, delta transfer | Go module `deedles.dev/tailsync` |
-| Mobile API (`Config`, `Node`, `EventListener`, …) | Go package `deedles.dev/tailsync/mobile` |
+| Protocol, index, scan, delta transfer | Go module `deedles.dev/tailsync` (`daemon` + internals) |
+| Mobile API (`Config`, `Node`, `EventListener`, …) | This repo `./mobile` (depends on `deedles.dev/tailsync/daemon`) |
 | Android UI, service, storage, keys | This repository |
 
-Upstream docs (README Android / gomobile section) describe binding and the mobile API. Rebuild the AAR from a tailsync checkout when the engine API changes:
+Rebuild the vendored AAR when `./mobile` or the engine pin changes:
 
 ```bash
-# In a tailsync (Go) checkout — not this repo
-gomobile bind -target=android -o tailsync.aar deedles.dev/tailsync/mobile
+go get deedles.dev/tailsync@…   # only when changing the engine pin
+go mod tidy
+./scripts/update-aar.sh         # binds against go.mod as-is
+go test ./mobile/
 ```
 
-How the AAR is vendored or published for this app may evolve; follow whatever the tree currently does (`libs/`, local Maven, etc.) rather than inventing a new path without need.
+Engine version is a normal `go.mod` require. The app depends on `app/libs/tailsync.aar` only at Gradle time.
 
 ## Development commands
 
 ```bash
+./scripts/update-aar.sh
+go test ./mobile/
 ./gradlew assembleDebug
 ./gradlew assembleRelease
 ./gradlew test
@@ -85,8 +91,8 @@ Use the project wrapper (`./gradlew`), not a system Gradle install. Exact tasks 
 2. **Do not pin versions in this file** — refer to Gradle catalog / build files or unversioned names so these instructions stay valid as versions change.
 3. **Verify** with `./gradlew` tasks appropriate to the change (`assembleDebug`, `test`, `lint`, etc.) before considering work done.
 4. **Secrets** — do not commit tokens, API keys, Tailscale auth keys, `local.properties`, or machine-specific paths.
-5. **Engine boundary** — do not fork or reimplement the Go sync engine in Kotlin; integrate the mobile API and improve the Android shell around it.
-6. **Scope** — this is the Android wrapper only; do not modify an adjacent Go tailsync checkout unless the user explicitly asks.
+5. **Engine boundary** — do not fork or reimplement the Go sync engine in Kotlin or in `./mobile`; call `deedles.dev/tailsync/daemon` and keep `./mobile` a thin gomobile lifecycle/net facade.
+6. **Scope** — this is the Android app + mobile bind package; do not modify an adjacent Go tailsync checkout unless the user explicitly asks.
 
 ## PR checklist
 
