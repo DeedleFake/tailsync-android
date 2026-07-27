@@ -68,7 +68,6 @@ class SettingsRepository(context: Context) : SettingsStore {
             authKey = readAuthKey(),
             port = SettingsValidation.clampPort(prefs.getInt(KEY_PORT, 0)),
             peers = prefs.getString(KEY_PEERS, "") ?: "",
-            serviceName = prefs.getString(KEY_SERVICE_NAME, "") ?: "",
             scanIntervalMs = prefs.getLong(KEY_SCAN_MS, 0L).coerceAtLeast(0L),
             syncIntervalMs = prefs.getLong(KEY_SYNC_MS, 0L).coerceAtLeast(0L),
             blockSize = prefs.getInt(KEY_BLOCK_SIZE, 0).coerceAtLeast(0),
@@ -83,12 +82,12 @@ class SettingsRepository(context: Context) : SettingsStore {
             putString(KEY_HOSTNAME, settings.hostname)
             putInt(KEY_PORT, SettingsValidation.clampPort(settings.port))
             putString(KEY_PEERS, settings.peers)
-            putString(KEY_SERVICE_NAME, settings.serviceName)
             putLong(KEY_SCAN_MS, settings.scanIntervalMs.coerceAtLeast(0L))
             putLong(KEY_SYNC_MS, settings.syncIntervalMs.coerceAtLeast(0L))
             putInt(KEY_BLOCK_SIZE, settings.blockSize.coerceAtLeast(0))
-            // Drop legacy net_mode preference (always tsnet on Android).
+            // Drop legacy preferences removed from the engine / UI.
             remove(KEY_NET_MODE)
+            remove(KEY_SERVICE_NAME)
             if (settings.treeUri.isNullOrBlank()) {
                 remove(KEY_TREE_URI)
             } else {
@@ -197,12 +196,13 @@ class SettingsRepository(context: Context) : SettingsStore {
         private const val KEY_AUTH_KEY = "auth_key"
         private const val KEY_PORT = "port"
         private const val KEY_PEERS = "peers"
-        private const val KEY_SERVICE_NAME = "service_name"
         private const val KEY_SCAN_MS = "scan_interval_ms"
         private const val KEY_SYNC_MS = "sync_interval_ms"
         private const val KEY_BLOCK_SIZE = "block_size"
         /** Legacy key; removed on save. Android always uses tsnet. */
         private const val KEY_NET_MODE = "net_mode"
+        /** Legacy key; ServiceName was removed from daemon discovery. */
+        private const val KEY_SERVICE_NAME = "service_name"
         private const val KEY_TREE_URI = "tree_uri"
         private const val KEY_SERVICE_WANTED = "service_wanted"
     }
@@ -215,7 +215,6 @@ data class UserSettings(
     val authKey: String,
     val port: Int,
     val peers: String,
-    val serviceName: String,
     val scanIntervalMs: Long,
     val syncIntervalMs: Long,
     val blockSize: Int,

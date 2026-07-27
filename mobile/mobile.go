@@ -96,11 +96,8 @@ type Config struct {
 	// Port is the UDP listen/dial port for QUIC peer sessions (0 = daemon default).
 	Port int
 	// Peers is a comma-separated list of host:port peers (optional test/override;
-	// empty = in-memory hot set after Hello union status Online discovery).
+	// empty = Tailscale status Online discovery with soft dial/backoff).
 	Peers string
-	// ServiceName filters discovered peers by hostname/DNS substring.
-	// Empty with empty Peers may dial every online peer; prefer ServiceName on large tailnets.
-	ServiceName string
 	// ScanIntervalMs is the safety-net full rescan period in milliseconds (0 = default).
 	ScanIntervalMs int64
 	// SyncIntervalMs is the backup peer pull period in milliseconds (0 = default).
@@ -251,7 +248,6 @@ func (n *Node) StatusJSON() (string, error) {
 		Hostname:     n.cfg.Hostname,
 		Port:         port,
 		NetMode:      effectiveNetMode(n.cfg.NetMode),
-		Service:      n.cfg.ServiceName,
 		Peers:        n.cfg.Peers,
 		ScanMs:       scanMs,
 		SyncMs:       syncMs,
@@ -385,7 +381,6 @@ func toDaemonConfig(cfg *Config, log *slog.Logger, onReady func(), onAuthURL fun
 		Dir:           cfg.Dir,
 		StateDir:      cfg.StateDir,
 		Hostname:      cfg.Hostname,
-		ServiceName:   cfg.ServiceName,
 		Port:          cfg.Port,
 		AuthKey:       cfg.AuthKey,
 		ScanInterval:  scanEvery,
@@ -411,7 +406,6 @@ type statusSnapshot struct {
 	Hostname     string `json:"hostname,omitempty"`
 	Port         int    `json:"port"`
 	NetMode      string `json:"net_mode"`
-	Service      string `json:"service,omitempty"`
 	Peers        string `json:"peers,omitempty"`
 	ScanMs       int64  `json:"scan_interval_ms"`
 	SyncMs       int64  `json:"sync_interval_ms"`

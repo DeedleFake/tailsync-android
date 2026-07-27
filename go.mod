@@ -3,7 +3,7 @@ module tailsync-android
 go 1.26.5
 
 require (
-	deedles.dev/tailsync v0.0.0-20260727054307-a6bf8b06b330
+	deedles.dev/tailsync v0.0.0-20260727183056-cae741ca77f1
 	tailscale.com v1.102.0
 )
 

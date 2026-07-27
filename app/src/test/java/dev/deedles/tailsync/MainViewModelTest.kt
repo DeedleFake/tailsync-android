@@ -51,7 +51,6 @@ class MainViewModelTest {
                 authKey = "tskey-auth-test",
                 port = 0,
                 peers = "",
-                serviceName = "",
                 scanIntervalMs = 0,
                 syncIntervalMs = 0,
                 blockSize = 0,

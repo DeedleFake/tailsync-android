@@ -305,7 +305,6 @@ private fun StatusRows(summary: StatusSummary) {
         add("State dir" to summary.stateDir.ifBlank { "—" })
         add("Hostname" to summary.hostname.ifBlank { "—" })
         add("Port" to summary.port.toString())
-        add("Service filter" to summary.service.ifBlank { "—" })
         add("Peers" to summary.peers.ifBlank { "(discovery)" })
         add("Scan ms" to summary.scanIntervalMs.toString())
         add("Sync ms" to summary.syncIntervalMs.toString())
@@ -602,15 +601,6 @@ private fun ConfigCard(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 supportingText = { Text("Valid range 0–65535") },
-            )
-            OutlinedTextField(
-                value = form.serviceName,
-                onValueChange = { value -> onChange { it.copy(serviceName = value) } },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = enabled,
-                label = { Text("Service name filter") },
-                singleLine = true,
-                supportingText = { Text("Hostname/DNS substring filter for discovery") },
             )
             OutlinedTextField(
                 value = form.peers,

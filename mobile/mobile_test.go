@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"deedles.dev/tailsync/daemon"
 	"tailsync-android/mobile"
 )
 
@@ -226,24 +227,24 @@ func TestStatusJSON(t *testing.T) {
 	if m["net_mode"] != "plain" {
 		t.Fatalf("net_mode: %v", m["net_mode"])
 	}
-	// Effective defaults (zeros not echoed).
-	if int(m["port"].(float64)) != 5960 {
-		t.Fatalf("port: %v want 5960", m["port"])
+	// Effective defaults (zeros not echoed); keep in sync with daemon package.
+	if int(m["port"].(float64)) != daemon.DefaultPort {
+		t.Fatalf("port: %v want %d", m["port"], daemon.DefaultPort)
 	}
-	if int(m["scan_interval_ms"].(float64)) != 30_000 {
-		t.Fatalf("scan_interval_ms: %v", m["scan_interval_ms"])
+	if int(m["scan_interval_ms"].(float64)) != int(daemon.DefaultScanInterval.Milliseconds()) {
+		t.Fatalf("scan_interval_ms: %v want %d", m["scan_interval_ms"], daemon.DefaultScanInterval.Milliseconds())
 	}
-	if int(m["sync_interval_ms"].(float64)) != 45_000 {
-		t.Fatalf("sync_interval_ms: %v", m["sync_interval_ms"])
+	if int(m["sync_interval_ms"].(float64)) != int(daemon.DefaultSyncInterval.Milliseconds()) {
+		t.Fatalf("sync_interval_ms: %v want %d", m["sync_interval_ms"], daemon.DefaultSyncInterval.Milliseconds())
 	}
-	if int(m["watch_debounce_ms"].(float64)) != 1000 {
-		t.Fatalf("watch_debounce_ms: %v", m["watch_debounce_ms"])
+	if int(m["watch_debounce_ms"].(float64)) != int(daemon.DefaultWatchDebounce.Milliseconds()) {
+		t.Fatalf("watch_debounce_ms: %v want %d", m["watch_debounce_ms"], daemon.DefaultWatchDebounce.Milliseconds())
 	}
-	if int(m["dial_timeout_ms"].(float64)) != 5_000 {
-		t.Fatalf("dial_timeout_ms: %v", m["dial_timeout_ms"])
+	if int(m["dial_timeout_ms"].(float64)) != int(daemon.DefaultDialTimeout.Milliseconds()) {
+		t.Fatalf("dial_timeout_ms: %v want %d", m["dial_timeout_ms"], daemon.DefaultDialTimeout.Milliseconds())
 	}
-	if int(m["block_size"].(float64)) != 4096 {
-		t.Fatalf("block_size: %v", m["block_size"])
+	if int(m["block_size"].(float64)) != daemon.DefaultBlockSize {
+		t.Fatalf("block_size: %v want %d", m["block_size"], daemon.DefaultBlockSize)
 	}
 	if strings.Contains(s, "tskey-should-not-appear") {
 		t.Fatal("auth key leaked in StatusJSON")

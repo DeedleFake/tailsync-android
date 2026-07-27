@@ -329,7 +329,6 @@ class TailsyncService : LifecycleService() {
             authKey = user.authKey
             port = user.port.toLong()
             peers = user.peers.trim()
-            serviceName = user.serviceName.trim()
             scanIntervalMs = user.scanIntervalMs
             syncIntervalMs = user.syncIntervalMs
             blockSize = user.blockSize.toLong()
