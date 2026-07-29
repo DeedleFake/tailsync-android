@@ -85,14 +85,40 @@ Use the project wrapper (`./gradlew`), not a system Gradle install. Exact tasks 
 - Avoid growing hand-maintained source files past ~1000 lines without decomposing them.
 - Do not introduce public Internet or bind-to-all networking for sync; tailsync is tailnet-oriented.
 
+## Communication (ASD-STE100)
+
+**Unless the user explicitly says otherwise, write all user-facing responses in ASD-STE100 (Simplified Technical English).**
+
+This applies to chat replies, status updates, explanations, and summaries. It does **not** force rewrite of existing code, identifiers, log strings already in the tree, or third-party text. New user-visible copy you author (UI strings, comments only when the user asks for STE, docs you write in-session) should follow STE when practical.
+
+### Practical STE rules for agents
+
+Follow these rules when you write to the user (you need not load the full ASD dictionary):
+
+1. **One idea per sentence.** Prefer short sentences: about 20 words or fewer for procedures; about 25 words or fewer for descriptions.
+2. **Active voice and direct verbs.** Prefer “Start the service” over “The service should be started.” Prefer imperative for steps.
+3. **Simple tenses.** Prefer present, simple past, and simple future. Avoid progressive forms when a simple form is clear (“The build fails” not “The build is failing” unless ongoing state matters).
+4. **Consistent terms.** Use one name for one thing (e.g. always “sync dir”, not alternating “folder”, “path”, “directory” for the same concept unless you must match code identifiers).
+5. **No slang, idioms, or filler.** Avoid phrases like “out of the box”, “under the hood”, “basically”, “just”, “kind of”. State facts.
+6. **Limited noun clusters.** Prefer “path of the sync directory” over long stacks like “user selected external storage sync directory path configuration”.
+7. **Lists for steps and parallel items.** Use numbered steps for procedures; bullets for non-ordered items.
+8. **Technical names allowed.** Keep API names, package paths, flags, error messages, and code identifiers exact (`Node.Start`, `MANAGE_EXTERNAL_STORAGE`, `StatusJSON`). Do not “simplify” them into paraphrase that loses precision.
+9. **Articles and pronouns.** Prefer clear nouns over vague “this/that/it” when the referent could be ambiguous.
+10. **No decorative language.** Do not use marketing tone, hype, or unnecessary metaphor.
+
+If STE would hide a needed technical distinction, keep the precise technical wording and still keep sentence structure simple.
+
+**Override:** If the user asks for casual tone, full prose, a specific style, or “not STE”, follow that request for the rest of the conversation (or until they restore STE).
+
 ## Agent guidelines
 
-1. **Git is read-only under all circumstances.** Never run write/mutating git commands. That includes (non-exhaustive): `commit`, `add`, `rm`, `mv`, `restore --staged`, `checkout`, `switch`, `branch` (create/delete), `merge`, `rebase`, `cherry-pick`, `stash`, `reset`, `clean`, `tag`, `push`, `pull` (when it updates refs), `am`, `revert`, `commit --amend`, or anything that modifies the index, working tree via git, or remote state. Read-only commands (`status`, `diff`, `log`, `show`, `blame`, `ls-files`, etc.) are fine. Leave all commits and branch management to the user.
-2. **Do not pin versions in this file** — refer to Gradle catalog / build files or unversioned names so these instructions stay valid as versions change.
-3. **Verify** with `./gradlew` tasks appropriate to the change (`assembleDebug`, `test`, `lint`, etc.) before considering work done.
-4. **Secrets** — do not commit tokens, API keys, Tailscale auth keys, `local.properties`, or machine-specific paths.
-5. **Engine boundary** — do not fork or reimplement the Go sync engine in Kotlin or in `./mobile`; call `deedles.dev/tailsync/daemon` and keep `./mobile` a thin gomobile lifecycle/net facade.
-6. **Scope** — this is the Android app + mobile bind package; do not modify an adjacent Go tailsync checkout unless the user explicitly asks.
+1. **User-facing language is ASD-STE100 by default** — see [Communication (ASD-STE100)](#communication-asd-ste100). Override only when the user explicitly asks.
+2. **Git is read-only under all circumstances.** Never run write/mutating git commands. That includes (non-exhaustive): `commit`, `add`, `rm`, `mv`, `restore --staged`, `checkout`, `switch`, `branch` (create/delete), `merge`, `rebase`, `cherry-pick`, `stash`, `reset`, `clean`, `tag`, `push`, `pull` (when it updates refs), `am`, `revert`, `commit --amend`, or anything that modifies the index, working tree via git, or remote state. Read-only commands (`status`, `diff`, `log`, `show`, `blame`, `ls-files`, etc.) are fine. Leave all commits and branch management to the user.
+3. **Do not pin versions in this file** — refer to Gradle catalog / build files or unversioned names so these instructions stay valid as versions change.
+4. **Verify** with `./gradlew` tasks appropriate to the change (`assembleDebug`, `test`, `lint`, etc.) before considering work done.
+5. **Secrets** — do not commit tokens, API keys, Tailscale auth keys, `local.properties`, or machine-specific paths.
+6. **Engine boundary** — do not fork or reimplement the Go sync engine in Kotlin or in `./mobile`; call `deedles.dev/tailsync/daemon` and keep `./mobile` a thin gomobile lifecycle/net facade.
+7. **Scope** — this is the Android app + mobile bind package; do not modify an adjacent Go tailsync checkout unless the user explicitly asks.
 
 ## PR checklist
 
