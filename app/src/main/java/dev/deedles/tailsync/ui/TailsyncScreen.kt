@@ -1,5 +1,6 @@
 package dev.deedles.tailsync.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,19 +12,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -58,6 +65,12 @@ import dev.deedles.tailsync.MainViewModel
 import dev.deedles.tailsync.StatusSummary
 import dev.deedles.tailsync.UiState
 
+private enum class AppScreen {
+    Home,
+    Events,
+    Diagnostics,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TailsyncScreen(
@@ -69,6 +82,8 @@ fun TailsyncScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var screen by remember { mutableStateOf(AppScreen.Home) }
+    var menuExpanded by remember { mutableStateOf(false) }
 
     // Auto-open once per distinct URL when login is required (service may also open).
     LaunchedEffect(state.authUrl, state.needsLogin) {
@@ -81,91 +96,297 @@ fun TailsyncScreen(
         }
     }
 
+    val onBack: () -> Unit = { screen = AppScreen.Home }
+    if (screen != AppScreen.Home) {
+        BackHandler(onBack = onBack)
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Tailsync") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-            )
+            when (screen) {
+                AppScreen.Home -> {
+                    TopAppBar(
+                        title = { Text("Tailsync") },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ),
+                        actions = {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "More options",
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Events") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        screen = AppScreen.Events
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Diagnostics") },
+                                    onClick = {
+                                        menuExpanded = false
+                                        screen = AppScreen.Diagnostics
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+                AppScreen.Events -> {
+                    SubscreenTopBar(title = "Events", onBack = onBack)
+                }
+                AppScreen.Diagnostics -> {
+                    SubscreenTopBar(title = "Diagnostics", onBack = onBack)
+                }
+            }
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (!state.hasAllFilesAccess) {
-                AllFilesAccessCard(onGrant = onGrantAllFilesAccess)
-            }
-            ServiceCard(state = state, onToggle = viewModel::setServiceEnabled)
-            if (!state.formEnabled) {
-                Text(
-                    when {
-                        state.phase == "starting" ||
-                            (state.switchChecked && !state.serviceRunning) ->
-                            "Configuration is locked while the service is starting." 
-                        state.phase == "stopping" ->
-                            "Configuration is locked while the service is stopping."
-                        else ->
-                            "Configuration is locked while the service is running. " +
-                                "Stop the service to edit settings (restart required for changes)."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
+        when (screen) {
+            AppScreen.Home -> {
+                HomeContent(
+                    state = state,
+                    viewModel = viewModel,
+                    onPickDirectory = onPickDirectory,
+                    onGrantAllFilesAccess = onGrantAllFilesAccess,
+                    onOpenAuthUrl = onOpenAuthUrl,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
                 )
             }
-            StatusCard(state = state)
-            AuthCard(
-                form = state.form,
-                enabled = state.formEnabled,
-                hasStoredAuthKey = state.hasStoredAuthKey,
-                needsLogin = state.needsLogin,
-                authUrl = state.authUrl,
-                onChange = viewModel::updateForm,
-                onOpenAuthUrl = onOpenAuthUrl,
-            )
-            DirectoryCard(
-                form = state.form,
-                pathHint = state.pathHint,
-                enabled = state.formEnabled,
-                canPickDirectory = state.canPickDirectory,
-                hasAllFilesAccess = state.hasAllFilesAccess,
-                onChange = viewModel::updateForm,
-                onPickDirectory = onPickDirectory,
-                onGrantAllFilesAccess = onGrantAllFilesAccess,
-            )
-            ConfigCard(
-                form = state.form,
-                enabled = state.formEnabled,
-                onChange = viewModel::updateForm,
-            )
-            Button(
-                onClick = viewModel::saveSettings,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = state.formEnabled,
-            ) {
-                Text(if (state.formEnabled) "Save settings" else "Stop service to edit & save")
-            }
-            state.saveMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.primary)
-            }
-            LogsCard(lines = state.logLines)
-            DiagnosticsCard(context = context)
-            state.engineVersion?.let {
-                Text(
-                    "Engine: $it",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            AppScreen.Events -> {
+                EventsScreen(
+                    lines = state.logLines,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
                 )
             }
-            Spacer(Modifier.height(24.dp))
+            AppScreen.Diagnostics -> {
+                DiagnosticsScreen(
+                    context = context,
+                    engineVersion = state.engineVersion,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                )
+            }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubscreenTopBar(
+    title: String,
+    onBack: () -> Unit,
+) {
+    TopAppBar(
+        title = { Text(title) },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    )
+}
+
+@Composable
+private fun HomeContent(
+    state: UiState,
+    viewModel: MainViewModel,
+    onPickDirectory: () -> Unit,
+    onGrantAllFilesAccess: () -> Unit,
+    onOpenAuthUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        if (!state.hasAllFilesAccess) {
+            AllFilesAccessCard(onGrant = onGrantAllFilesAccess)
+        }
+        ServiceCard(state = state, onToggle = viewModel::setServiceEnabled)
+        if (!state.formEnabled) {
+            Text(
+                when {
+                    state.phase == "starting" ||
+                        (state.switchChecked && !state.serviceRunning) ->
+                        "Configuration is locked while the service is starting."
+                    state.phase == "stopping" ->
+                        "Configuration is locked while the service is stopping."
+                    else ->
+                        "Configuration is locked while the service is running. " +
+                            "Stop the service to edit settings (restart required for changes)."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        StatusCard(state = state)
+        AuthCard(
+            form = state.form,
+            enabled = state.formEnabled,
+            hasStoredAuthKey = state.hasStoredAuthKey,
+            needsLogin = state.needsLogin,
+            authUrl = state.authUrl,
+            onChange = viewModel::updateForm,
+            onOpenAuthUrl = onOpenAuthUrl,
+        )
+        DirectoryCard(
+            form = state.form,
+            pathHint = state.pathHint,
+            enabled = state.formEnabled,
+            canPickDirectory = state.canPickDirectory,
+            hasAllFilesAccess = state.hasAllFilesAccess,
+            onChange = viewModel::updateForm,
+            onPickDirectory = onPickDirectory,
+            onGrantAllFilesAccess = onGrantAllFilesAccess,
+        )
+        ConfigCard(
+            form = state.form,
+            enabled = state.formEnabled,
+            onChange = viewModel::updateForm,
+        )
+        Button(
+            onClick = viewModel::saveSettings,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = state.formEnabled,
+        ) {
+            Text(if (state.formEnabled) "Save settings" else "Stop service to edit & save")
+        }
+        state.saveMessage?.let {
+            Text(it, color = MaterialTheme.colorScheme.primary)
+        }
+        state.engineVersion?.let {
+            Text(
+                "Engine: $it",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun EventsScreen(
+    lines: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    // Newest first; full list (no short preview cap used on the home screen).
+    val shown = remember(lines) { lines.asReversed() }
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Live events from the sync engine. Newest entries appear first.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (shown.isEmpty()) {
+            Text(
+                "No events yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    shown.forEach { line ->
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Durable start breadcrumbs (survives native SIGABRT that kills the process
+ * before the in-app event log can help). Filter logcat:
+ * `adb logcat -s TailsyncDiag GoLog Go`
+ */
+@Composable
+private fun DiagnosticsScreen(
+    context: android.content.Context,
+    engineVersion: String?,
+    modifier: Modifier = Modifier,
+) {
+    var text by remember {
+        mutableStateOf(DiagLog.readRecent(context, maxLines = DIAG_MAX_LINES))
+    }
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "Survives crashes. Last steps before a native abort appear here after relaunch. " +
+                "logcat: adb logcat -s TailsyncDiag GoLog Go",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        engineVersion?.let {
+            Text(
+                "Engine: $it",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(
+            onClick = { text = DiagLog.readRecent(context, maxLines = DIAG_MAX_LINES) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Refresh, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Refresh")
+        }
+        if (text.isBlank()) {
+            Text(
+                "No diagnostic trail yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            SelectionContainer {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -650,70 +871,4 @@ private fun ConfigCard(
     }
 }
 
-@Composable
-private fun LogsCard(lines: List<String>) {
-    // Show last N lines without a nested scrollable (parent Column scrolls).
-    val shown = remember(lines) { lines.takeLast(LOG_PREVIEW_LINES).asReversed() }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Recent events", style = MaterialTheme.typography.titleMedium)
-            if (shown.isEmpty()) {
-                Text(
-                    "No events yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                shown.forEach { line ->
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Durable start breadcrumbs (survives native SIGABRT that kills the process
- * before "Recent events" can help). Filter logcat: `adb logcat -s TailsyncDiag GoLog Go`
- */
-@Composable
-private fun DiagnosticsCard(context: android.content.Context) {
-    var text by remember {
-        mutableStateOf(DiagLog.readRecent(context, maxLines = 40))
-    }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Start diagnostics", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Survives crashes. Last steps before a native abort appear here after relaunch. " +
-                    "logcat: adb logcat -s TailsyncDiag GoLog Go",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(onClick = { text = DiagLog.readRecent(context, maxLines = 40) }) {
-                Text("Refresh")
-            }
-            if (text.isBlank()) {
-                Text(
-                    "No diagnostic trail yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    text,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                )
-            }
-        }
-    }
-}
-
-private const val LOG_PREVIEW_LINES = 20
+private const val DIAG_MAX_LINES = 80
