@@ -40,6 +40,34 @@ class PathUtilsTest {
     }
 
     @Test
+    fun treeDocumentId_rejectsDotDot() {
+        assertNull(PathUtils.treeDocumentIdToAbsolutePath("primary:../../data"))
+        assertNull(PathUtils.treeDocumentIdToAbsolutePath("primary:Download/../../../etc"))
+        assertNull(PathUtils.treeDocumentIdToAbsolutePath("ABCD-1234:../emulated/0"))
+    }
+
+    @Test
+    fun treeDocumentId_normalizesDotSegments() {
+        val path = PathUtils.treeDocumentIdToAbsolutePath("primary:Download/./Tailsync")
+        assertEquals("/storage/emulated/0/Download/Tailsync", path)
+    }
+
+    @Test
+    fun treeDocumentId_rejectsWeirdVolume() {
+        assertNull(PathUtils.treeDocumentIdToAbsolutePath("../evil:foo"))
+        assertNull(PathUtils.treeDocumentIdToAbsolutePath("a/b:foo"))
+    }
+
+    @Test
+    fun treeDocumentId_customPrimaryRoot() {
+        val path = PathUtils.treeDocumentIdToAbsolutePath(
+            "primary:Download",
+            primaryRoot = "/storage/emulated/10",
+        )
+        assertEquals("/storage/emulated/10/Download", path)
+    }
+
+    @Test
     fun isAbsoluteWritable_existingTempDir() {
         val dir = File.createTempFile("tailsync", "dir").apply {
             delete()

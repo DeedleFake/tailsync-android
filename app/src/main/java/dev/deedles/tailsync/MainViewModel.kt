@@ -344,6 +344,21 @@ class MainViewModel(
     }
 
     /**
+     * Explicitly removes the stored Tailscale auth key so the next start uses
+     * browser login. Blank auth fields on save do **not** clear the key.
+     */
+    fun clearStoredAuthKey() {
+        if (!uiState.value.formEnabled) {
+            _saveMessage.value = "Stop the service before changing settings"
+            return
+        }
+        settingsRepo.clearAuthKey()
+        _form.update { it.copy(authKey = "") }
+        _hasStoredAuthKey.value = settingsRepo.hasAuthKey()
+        _saveMessage.value = "Stored auth key removed — browser login will be used"
+    }
+
+    /**
      * Writes the current form to disk without checking [UiState.formEnabled].
      * Used on service enable so latest edits are visible to the service even
      * when pending locks the form.
@@ -637,7 +652,9 @@ private fun UserSettings.toFormState(): FormState = FormState(
     syncDir = syncDir,
     stateDir = stateDir,
     hostname = hostname,
-    authKey = authKey,
+    // Never copy the secret into the editable form. UiState.hasStoredAuthKey
+    // covers key-on-device; blank save keeps the stored key.
+    authKey = "",
     port = if (port == 0) "" else port.toString(),
     peers = peers,
     scanIntervalMs = if (scanIntervalMs == 0L) "" else scanIntervalMs.toString(),
@@ -651,6 +668,7 @@ private fun FormState.toUserSettings(repo: SettingsStore): UserSettings = UserSe
     syncDir = syncDir.trim(),
     stateDir = stateDir.trim().ifBlank { repo.defaultStateDir().absolutePath },
     hostname = hostname.trim(),
+    // Blank means do not change stored key in SettingsRepository.save.
     authKey = authKey.trim(),
     port = SettingsValidation.clampPort(port),
     peers = peers.trim(),
