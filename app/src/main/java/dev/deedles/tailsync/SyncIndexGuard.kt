@@ -30,7 +30,14 @@ object SyncIndexGuard {
 
         val marker = File(stateDir, ROOT_MARKER)
         val previous = readMarker(marker)
-        val mismatch = previous != null && previous != sync
+        val indexExists = File(stateDir, INDEX_FILE).isFile
+        // Unknown binding (upgrade / no marker) with an existing index is also
+        // unsafe: the tree on disk may not match the index.
+        val mismatch = when {
+            previous != null && previous != sync -> true
+            previous == null && indexExists -> true
+            else -> false
+        }
         if (mismatch) {
             deleteIndexFiles(stateDir)
         }

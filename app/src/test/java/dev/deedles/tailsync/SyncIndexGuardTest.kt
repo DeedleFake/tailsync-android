@@ -9,7 +9,25 @@ import java.io.File
 class SyncIndexGuardTest {
 
     @Test
-    fun firstBind_writesMarkerWithoutClearing() {
+    fun firstBind_emptyState_writesMarkerWithoutClearing() {
+        val state = File.createTempFile("state", "dir").apply {
+            delete()
+            mkdirs()
+        }
+        try {
+            val cleared = SyncIndexGuard.reconcileSyncRoot(state, "/sync/a")
+            assertFalse(cleared)
+            assertEquals(
+                "/sync/a",
+                File(state, SyncIndexGuard.ROOT_MARKER).readText().trim(),
+            )
+        } finally {
+            state.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun missingMarkerWithIndex_clearsIndex() {
         val state = File.createTempFile("state", "dir").apply {
             delete()
             mkdirs()
@@ -17,9 +35,12 @@ class SyncIndexGuardTest {
         try {
             val index = File(state, SyncIndexGuard.INDEX_FILE)
             index.writeText("{}")
+            val tsnet = File(state, "tsnet").apply { mkdirs() }
+            File(tsnet, "tailscaled.state").writeText("keep-me")
             val cleared = SyncIndexGuard.reconcileSyncRoot(state, "/sync/a")
-            assertFalse(cleared)
-            assertTrue(index.isFile)
+            assertTrue(cleared)
+            assertFalse(index.exists())
+            assertTrue(File(tsnet, "tailscaled.state").isFile)
             assertEquals(
                 "/sync/a",
                 File(state, SyncIndexGuard.ROOT_MARKER).readText().trim(),
