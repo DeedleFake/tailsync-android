@@ -1,6 +1,7 @@
 package dev.deedles.tailsync
 
 import android.net.Uri
+import android.os.Environment
 import android.provider.DocumentsContract
 import java.io.File
 
@@ -14,9 +15,11 @@ import java.io.File
  * app-private storage and is not the product sync destination.
  *
  * Volume path mapping is best-effort:
- * - primary → `/storage/emulated/0` (standard on modern devices; minSdk 37)
+ * - primary → process-visible external storage (`Environment.getExternalStorageDirectory()`,
+ *   typically `/storage/emulated/<user>`)
  * - other volume ids → `/storage/<id>`
- * Unresolvable or non-writable paths fail closed without inventing a private sync root.
+ * Unresolvable, traversable (`..`), or non-writable paths fail closed without
+ * inventing a private sync root.
  */
 object PathUtils {
 
@@ -31,27 +34,54 @@ object PathUtils {
         }
         val docId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
             ?: return null
-        return treeDocumentIdToAbsolutePath(docId)
+        // Process-visible primary volume (correct for secondary users / profiles).
+        val primaryRoot = Environment.getExternalStorageDirectory().absolutePath
+        return treeDocumentIdToAbsolutePath(docId, primaryRoot = primaryRoot)
     }
 
     /**
      * Maps a Storage Access Framework tree document id (`volume:relative/path`)
      * to an absolute filesystem path. Pure for unit testing.
+     *
+     * Rejects path segments that escape the volume root (`..`) and volume ids
+     * that are not simple names. Normalizes `.` / redundant separators.
      */
-    fun treeDocumentIdToAbsolutePath(docId: String): String? {
+    fun treeDocumentIdToAbsolutePath(
+        docId: String,
+        primaryRoot: String = "/storage/emulated/0",
+    ): String? {
         val parts = docId.split(":", limit = 2)
         if (parts.size < 2) return null
         val volume = parts[0]
         val relative = parts[1].trimStart('/')
         if (volume.isBlank()) return null
-        return when {
+        // Volume ids from SAF are simple (primary / UUID); reject path-like ids.
+        if (volume.contains('/') || volume.contains('\\') || volume.contains("..")) {
+            return null
+        }
+        if (relative.contains('\u0000')) return null
+        for (segment in relative.split('/')) {
+            if (segment == "..") return null
+        }
+
+        val rootPath = when {
             volume.equals("primary", ignoreCase = true) ->
-                // Best-effort primary root; not derived from StorageManager (keeps pure mapping).
-                File("/storage/emulated/0", relative).absolutePath
+                File(primaryRoot).absolutePath
             else ->
                 // Secondary volumes (SD cards, etc.): /storage/<uuid>/...
-                File("/storage/$volume", relative).absolutePath
+                File("/storage/$volume").absolutePath
         }
+        val joined = if (relative.isEmpty()) {
+            File(rootPath).toPath()
+        } else {
+            File(rootPath, relative).toPath()
+        }
+        val normalized = joined.normalize().toAbsolutePath().toString()
+        val rootNormalized = File(rootPath).toPath().normalize().toAbsolutePath().toString()
+        if (normalized != rootNormalized && !normalized.startsWith("$rootNormalized/")) {
+            return null
+        }
+        return normalized
     }
 
     /** Creates [path] if missing. Intentional create — not used during pure validation. */

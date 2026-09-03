@@ -11,6 +11,8 @@ interface SettingsStore {
     /** App-private state/index + tsnet dir (not the user sync root). */
     fun defaultStateDir(): File
     fun hasAuthKey(): Boolean
+    /** Removes any stored auth key (browser login becomes the path). */
+    fun clearAuthKey()
     fun consumeAuthKeyResetNotice(): Boolean
     fun isServiceWanted(): Boolean
     fun setServiceWanted(wanted: Boolean)

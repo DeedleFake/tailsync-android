@@ -39,6 +39,10 @@ class SettingsRepository(context: Context) : SettingsStore {
         false
     }
 
+    override fun clearAuthKey() {
+        writeAuthKey("")
+    }
+
     /**
      * One-shot flag set when encrypted prefs had to be wiped due to
      * Keystore/crypto failure. Cleared when read.
@@ -76,6 +80,22 @@ class SettingsRepository(context: Context) : SettingsStore {
     }
 
     override fun save(settings: UserSettings) {
+        val previousSync = prefs.getString(KEY_SYNC_DIR, null)?.takeIf { it.isNotBlank() }
+        val previousState = prefs.getString(KEY_STATE_DIR, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: defaultStateDir().absolutePath
+        val newSync = settings.syncDir.trim()
+        // Sync-root change with a reused state dir: drop index so the engine does
+        // not treat the old tree as offline deletions (peer mass-delete).
+        if (previousSync != null && newSync.isNotEmpty() && previousSync != newSync) {
+            val stateForIndex = settings.stateDir.trim().ifBlank { previousState }
+            // Prefer clearing the prior state dir (where the stale index lives).
+            SyncIndexGuard.deleteIndexFiles(File(previousState))
+            if (stateForIndex != previousState) {
+                SyncIndexGuard.deleteIndexFiles(File(stateForIndex))
+            }
+            Log.i(TAG, "Cleared sync index after sync dir change")
+        }
         prefs.edit {
             putString(KEY_SYNC_DIR, settings.syncDir)
             putString(KEY_STATE_DIR, settings.stateDir)
@@ -94,12 +114,16 @@ class SettingsRepository(context: Context) : SettingsStore {
                 putString(KEY_TREE_URI, settings.treeUri)
             }
         }
-        writeAuthKey(settings.authKey)
+        // Blank authKey in a settings write means "leave stored key unchanged".
+        // Call [clearAuthKey] to remove it for browser-only login.
+        if (settings.authKey.isNotBlank()) {
+            writeAuthKey(settings.authKey)
+        }
     }
 
     private fun readAuthKey(): String = try {
         getSecurePrefs().getString(KEY_AUTH_KEY, "") ?: ""
-    } catch (_: Exception) {
+    } catch (e: GeneralSecurityException) {
         Log.w(TAG, "Failed to read secure prefs; resetting encrypted store")
         recreateSecurePrefs()
         try {
@@ -107,6 +131,10 @@ class SettingsRepository(context: Context) : SettingsStore {
         } catch (_: Exception) {
             ""
         }
+    } catch (e: Exception) {
+        // Transient IO / disk errors: do not wipe the auth key store.
+        Log.w(TAG, "Failed to read secure prefs (not resetting): ${e.javaClass.simpleName}")
+        ""
     }
 
     private fun writeAuthKey(authKey: String) {
@@ -118,7 +146,7 @@ class SettingsRepository(context: Context) : SettingsStore {
                     putString(KEY_AUTH_KEY, authKey)
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: GeneralSecurityException) {
             Log.w(TAG, "Failed to write secure prefs; resetting encrypted store")
             recreateSecurePrefs()
             if (authKey.isNotBlank()) {
@@ -128,6 +156,8 @@ class SettingsRepository(context: Context) : SettingsStore {
                     Log.e(TAG, "Unable to store auth key after secure prefs reset")
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write secure prefs (not resetting): ${e.javaClass.simpleName}")
         }
     }
 
@@ -156,12 +186,9 @@ class SettingsRepository(context: Context) : SettingsStore {
             deleteSecurePrefsFiles()
             authKeyWasReset = true
             createEncryptedPrefs()
-        } catch (e: Exception) {
-            Log.w(TAG, "Encrypted prefs open failed; recreating")
-            deleteSecurePrefsFiles()
-            authKeyWasReset = true
-            createEncryptedPrefs()
         }
+        // Other failures (IO, disk) must not wipe the encrypted store — that
+        // permanently drops the auth key. Let callers surface the error.
     }
 
     private fun createEncryptedPrefs(): SharedPreferences {

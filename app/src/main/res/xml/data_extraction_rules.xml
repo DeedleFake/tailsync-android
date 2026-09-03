@@ -1,19 +1,20 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cloud backup is disabled via android:allowBackup="false". Device-to-device
+  transfer can still apply these rules: exclude secrets and the sync index so a
+  partial restore cannot trigger offline-deletion tombstones on peers.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="tailsync_secure.xml"/>
+        <exclude domain="sharedpref" path="tailsync_settings.xml"/>
+        <exclude domain="file" path="tailsync-state"/>
+        <exclude domain="file" path="tailsync-diag.log"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="tailsync_secure.xml"/>
+        <exclude domain="sharedpref" path="tailsync_settings.xml"/>
+        <exclude domain="file" path="tailsync-state"/>
+        <exclude domain="file" path="tailsync-diag.log"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

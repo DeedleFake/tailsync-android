@@ -284,6 +284,17 @@ class TailsyncService : LifecycleService() {
         }
         DiagLog.i("runStart[$gen] step=paths-ok sync=${syncDirFile.absolutePath}")
 
+        // Drop a stale index if the sync root changed (offline-delete → peer wipe).
+        if (SyncIndexGuard.reconcileSyncRoot(stateDirFile, syncDirFile.absolutePath)) {
+            DiagLog.w(
+                "runStart[$gen] cleared index.json — sync root changed " +
+                    "(prevents mass offline-deletion)",
+            )
+            TailsyncRuntime.appendLog(
+                "Sync folder changed — local index was reset (tsnet login kept)",
+            )
+        }
+
         if (!stillOwner(gen)) return
 
         // Required on Android API 30+: feed interfaces from Java so tsnet does

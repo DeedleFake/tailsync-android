@@ -278,6 +278,26 @@ class MainViewModelTest {
     }
 
     @Test
+    @Test
+    fun save_withBlankAuthKey_preservesStoredKey() {
+        assertEquals("tskey-auth-test", settings.load().authKey)
+        // Form starts with blank auth field (secret not mirrored).
+        assertEquals("", vm.form.value.authKey)
+        assertTrue(vm.uiState.value.hasStoredAuthKey)
+        vm.saveSettings()
+        assertEquals("tskey-auth-test", settings.load().authKey)
+        assertTrue(settings.hasAuthKey())
+    }
+
+    @Test
+    fun clearStoredAuthKey_removesKey() {
+        assertTrue(settings.hasAuthKey())
+        vm.clearStoredAuthKey()
+        assertFalse(settings.hasAuthKey())
+        assertEquals("", settings.load().authKey)
+        assertFalse(vm.uiState.value.hasStoredAuthKey)
+    }
+
     fun computeFormEnabled_rules() {
         assertTrue(MainViewModel.computeFormEnabled(false, "idle", null))
         assertFalse(MainViewModel.computeFormEnabled(true, "running", null))
@@ -444,6 +464,9 @@ class MainViewModelTest {
 
         override fun defaultStateDir(): File = File(settings.stateDir)
         override fun hasAuthKey(): Boolean = settings.authKey.isNotBlank()
+        override fun clearAuthKey() {
+            settings = settings.copy(authKey = "")
+        }
         override fun consumeAuthKeyResetNotice(): Boolean {
             val v = resetNotice
             resetNotice = false
@@ -457,7 +480,12 @@ class MainViewModelTest {
 
         override fun load(): UserSettings = settings
         override fun save(settings: UserSettings) {
-            this.settings = settings
+            // Match SettingsRepository: blank authKey leaves the stored key alone.
+            this.settings = if (settings.authKey.isBlank()) {
+                settings.copy(authKey = this.settings.authKey)
+            } else {
+                settings
+            }
         }
     }
 }

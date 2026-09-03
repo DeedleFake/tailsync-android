@@ -249,6 +249,7 @@ private fun HomeContent(
             needsLogin = state.needsLogin,
             authUrl = state.authUrl,
             onChange = viewModel::updateForm,
+            onClearAuthKey = viewModel::clearStoredAuthKey,
             onOpenAuthUrl = onOpenAuthUrl,
         )
         DirectoryCard(
@@ -553,6 +554,7 @@ private fun AuthCard(
     needsLogin: Boolean,
     authUrl: String?,
     onChange: ((FormState) -> FormState) -> Unit,
+    onClearAuthKey: () -> Unit,
     onOpenAuthUrl: (String) -> Unit,
 ) {
     var showKey by remember { mutableStateOf(false) }
@@ -672,7 +674,7 @@ private fun AuthCard(
                 Text(
                     "Optional. When set, used for tsnet registration instead of browser login. " +
                         "Stored with EncryptedSharedPreferences and never logged. Leave blank " +
-                        "for interactive browser sign-in.",
+                        "to keep any key already stored. Use Remove stored key for browser login.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -707,11 +709,20 @@ private fun AuthCard(
                     supportingText = {
                         when {
                             form.authKey.isNotBlank() -> Text("Key will be saved securely")
-                            hasStoredAuthKey -> Text("A key is stored securely on this device")
+                            hasStoredAuthKey -> Text("A key is stored securely (blank save keeps it)")
                             else -> Text("Optional — browser login is the default")
                         }
                     },
                 )
+                if (hasStoredAuthKey) {
+                    TextButton(
+                        onClick = onClearAuthKey,
+                        enabled = enabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Remove stored key")
+                    }
+                }
             }
         }
     }
